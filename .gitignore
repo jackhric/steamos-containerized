@@ -6,3 +6,9 @@
 
 # Local-only build notes / status docs
 /docs/
+
+# Stray in-tree cmake dir (the suite builds into /build/tests-build)
+/server/build/
+
+# Temporary compose override written by tests/steam-test.sh
+/docker-compose.usbip-test.yml

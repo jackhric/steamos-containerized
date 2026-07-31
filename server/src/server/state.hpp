@@ -51,6 +51,9 @@ public:
   unsigned short audio_stream_port = 48200;
   unsigned short control_stream_port = 47999;
 
+  // Advertised in /serverinfo over HTTPS only. 0 until the tunnel is actually listening.
+  int usb_bridge_port = 0;
+
   bool support_hevc = false;
   bool support_av1 = false;
 

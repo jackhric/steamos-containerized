@@ -13,7 +13,10 @@
 #include <netinet/tcp.h>
 #include <server/fake_udev.hpp>
 #include <server/usb_discovery.hpp>
+#include <server/usb_handshake.hpp>
 #include <server/usb_import_plan.hpp>
+#include <server/usb_transport.hpp>
+#include <server/usb_tunnel.hpp>
 #include <server/usbip_proto.hpp>
 #include <server/vhci.hpp>
 #include <sys/socket.h>
@@ -33,7 +36,7 @@ std::string env_or(const char *k, const std::string &def) {
 
 // Blocking read of exactly n bytes. USB/IP replies are fixed-size, so a short read is a protocol
 // error, not something to paper over.
-bool read_exact(int fd, void *buf, std::size_t n) {
+bool fd_read_exact(int fd, void *buf, std::size_t n) {
   auto *p = static_cast<std::uint8_t *>(buf);
   std::size_t got = 0;
   while (got < n) {
@@ -45,7 +48,7 @@ bool read_exact(int fd, void *buf, std::size_t n) {
   return true;
 }
 
-bool write_all(int fd, const std::string &s) {
+bool fd_write_all(int fd, const std::string &s) {
   std::size_t sent = 0;
   while (sent < s.size()) {
     auto r = ::send(fd, s.data() + sent, s.size() - sent, MSG_NOSIGNAL);
@@ -104,43 +107,52 @@ int tcp_connect(const std::string &host, const std::string &port, int timeout_ms
   return fd;
 }
 
-// Performs OP_REQ_IMPORT on an already-connected socket. On success the socket becomes the URB
-// stream and is handed to the kernel.
-bool do_import_handshake(int fd, const std::string &busid, UsbDevice &out) {
-  if (!write_all(fd, encode_req_import(busid))) {
-    logs::log(logs::warning, "[USBIP] sending OP_REQ_IMPORT for {} failed: {}", busid,
-              std::strerror(errno));
-    return false;
+// The DIRECT transport: a plain TCP connection to a usbipd. No auth, no encryption -- this is the
+// debug escape hatch that exercises the whole server side with no client changes at all, and it
+// belongs on loopback or a trusted LAN only.
+class DirectChannel : public Channel {
+public:
+  explicit DirectChannel(int fd) : fd_(fd) {}
+  ~DirectChannel() override {
+    if (fd_ >= 0)
+      ::close(fd_);
   }
 
-  std::uint8_t hdr[kOpCommonSize];
-  if (!read_exact(fd, hdr, sizeof(hdr))) {
-    logs::log(logs::warning, "[USBIP] no OP_REP_IMPORT for {} ({})", busid, std::strerror(errno));
-    return false;
-  }
-  OpCommon rep{};
-  if (!decode_op_common(hdr, sizeof(hdr), rep))
-    return false;
-  if (rep.version != kVersion) {
-    logs::log(logs::warning, "[USBIP] exporter speaks version 0x{:04x}, we speak 0x{:04x}",
-              rep.version, kVersion);
-    return false;
-  }
-  if (rep.status != 0) {
-    // A refused import sends ONLY the header -- do not go looking for a 312-byte body.
-    logs::log(logs::warning,
-              "[USBIP] exporter refused {} (status {}). Is it bound? `usbip bind -b {}`", busid,
-              rep.status, busid);
-    return false;
+  bool read_exact(void *buf, std::size_t n) override { return fd_read_exact(fd_, buf, n); }
+  bool write_all(std::string_view s) override { return fd_write_all(fd_, std::string(s)); }
+
+  // Nothing to pump: this socket already carries exactly the bytes the kernel wants.
+  int into_kernel_fd() override {
+    int fd = fd_;
+    fd_ = -1;
+    return fd;
   }
 
-  std::uint8_t body[kUsbDeviceSize];
-  if (!read_exact(fd, body, sizeof(body))) {
-    logs::log(logs::warning, "[USBIP] truncated OP_REP_IMPORT body for {}", busid);
-    return false;
+private:
+  int fd_;
+};
+
+class DirectTransport : public Transport {
+public:
+  DirectTransport(std::string host, std::string port, std::vector<std::string> busids)
+      : host_(std::move(host)), port_(std::move(port)), busids_(std::move(busids)) {}
+
+  std::string describe() const override { return "direct " + host_ + ":" + port_; }
+  std::vector<std::string> busids() override { return busids_; }
+
+  std::unique_ptr<Channel> open(const std::string &, int timeout_ms) override {
+    int fd = tcp_connect(host_, port_, timeout_ms);
+    if (fd < 0) {
+      logs::log(logs::warning, "[USBIP] cannot reach exporter {}:{}", host_, port_);
+      return nullptr;
+    }
+    return std::make_unique<DirectChannel>(fd);
   }
-  return decode_usb_device(body, sizeof(body), out);
-}
+
+private:
+  std::string host_, port_;
+  std::vector<std::string> busids_;
+};
 
 // Copy the host's already-computed udev entry. udevd ran every rule against this device, so its
 // properties (ID_VENDOR_ID, ID_SERIAL_SHORT, ...) are real; synthesizing them would be guesswork.
@@ -165,7 +177,20 @@ struct Attached {
 struct ImportManager::Impl {
   std::mutex mtx;
   bool enabled = false;
+  bool vhci_ok = false;
   std::string direct_host, direct_port;
+  TunnelServer *tunnel = nullptr;
+
+  // The tunnel wins when a client is connected: it is authenticated, encrypted, and its device
+  // list came from the user's own filter UI. DIRECT is the fallback and the debug path.
+  std::unique_ptr<Transport> pick_transport() {
+    if (tunnel && tunnel->has_client())
+      if (auto t = tunnel->transport())
+        return t;
+    if (!direct_host.empty())
+      return std::make_unique<DirectTransport>(direct_host, direct_port, busids);
+    return nullptr;
+  }
   std::vector<std::string> busids; // what to import
   std::string host_udev_dir;
   std::string port_record;         // where we note attached ports, for reap_stale
@@ -231,37 +256,42 @@ struct ImportManager::Impl {
     att.created_nodes.clear();
   }
 
-  bool import_one(const std::string &busid, int timeout_ms) {
-    if (direct_host.empty()) {
-      logs::log(logs::warning, "[USBIP] no transport configured (set STEAM_STREAM_USBIP_DIRECT)");
+  bool import_one(Transport &tr, const std::string &busid, int timeout_ms) {
+    auto ch = tr.open(busid, timeout_ms);
+    if (!ch)
       return false;
-    }
-
-    int fd = tcp_connect(direct_host, direct_port, timeout_ms);
-    if (fd < 0) {
-      logs::log(logs::warning, "[USBIP] cannot reach exporter {}:{}", direct_host, direct_port);
-      return false;
-    }
 
     UsbDevice udev{};
-    if (!do_import_handshake(fd, busid, udev)) {
-      ::close(fd);
+    auto hs = do_import_handshake(*ch, busid, udev);
+    if (hs.result != HandshakeResult::OK) {
+      if (hs.result == HandshakeResult::REFUSED)
+        logs::log(logs::warning, "[USBIP] exporter refused {} (status {}) -- is it bound? `usbip bind -b {}`",
+                  busid, hs.status, busid);
+      else if (hs.result == HandshakeResult::BAD_VERSION)
+        logs::log(logs::warning, "[USBIP] exporter speaks version 0x{:04x}, we speak 0x{:04x}", hs.peer_version,
+                  kVersion);
+      else
+        logs::log(logs::warning, "[USBIP] import of {} failed: {}", busid, describe(hs.result));
       return false;
     }
 
     auto rows = vhci::read_status();
     if (!rows) {
       logs::log(logs::warning, "[USBIP] cannot read vhci status -- is vhci_hcd loaded?");
-      ::close(fd);
       return false;
     }
     auto port = vhci::find_free_port(*rows, udev.speed);
     if (!port) {
       logs::log(logs::warning, "[USBIP] no free vhci {} port (8 max)",
                 vhci::clamp_speed(udev.speed) >= SPEED_SUPER ? "SuperSpeed" : "high-speed");
-      ::close(fd);
       return false;
     }
+
+    // On DIRECT this is the socket itself; on the tunnel it is a socketpair with a TLS pump on the
+    // other end, because a TLS stream cannot be handed to the kernel.
+    int fd = ch->into_kernel_fd();
+    if (fd < 0)
+      return false;
 
     if (!vhci::attach(*port, fd, udev.devid(), udev.speed)) {
       ::close(fd);
@@ -365,21 +395,31 @@ void ImportManager::init() {
     pos = comma + 1;
   }
 
-  bool vhci_ok = vhci::available();
-  I.enabled = vhci_ok && !I.direct_host.empty() && !I.busids.empty();
+  // vhci is the one hard requirement. Without it there is nowhere to put an imported device, and
+  // no transport can substitute.
+  I.vhci_ok = vhci::available();
+  I.enabled = I.vhci_ok;
 
-  if (!vhci_ok)
+  if (!I.vhci_ok) {
     logs::log(logs::info, "[USBIP] disabled: vhci_hcd unavailable or {}/attach not writable "
                           "(modprobe vhci-hcd; entrypoint remounts /sys)",
               vhci::kSysfsBase);
-  else if (I.direct_host.empty())
-    logs::log(logs::info, "[USBIP] vhci ready; idle (set STEAM_STREAM_USBIP_DIRECT=host[:port])");
-  else if (I.busids.empty())
-    logs::log(logs::info, "[USBIP] vhci ready, exporter {}:{}; idle (set STEAM_STREAM_USBIP_BUSIDS)",
+    return;
+  }
+  if (!I.direct_host.empty() && !I.busids.empty())
+    logs::log(logs::info, "[USBIP] vhci ready; DIRECT exporter {}:{}, busids [{}]", I.direct_host,
+              I.direct_port, list);
+  else if (!I.direct_host.empty())
+    logs::log(logs::info, "[USBIP] vhci ready, DIRECT exporter {}:{}; set STEAM_STREAM_USBIP_BUSIDS to use it",
               I.direct_host, I.direct_port);
   else
-    logs::log(logs::info, "[USBIP] enabled: exporter {}:{}, busids [{}]", I.direct_host,
-              I.direct_port, list);
+    logs::log(logs::info, "[USBIP] vhci ready; waiting for a tunnel client to offer devices");
+}
+
+void ImportManager::set_tunnel(TunnelServer *t) {
+  auto &I = *impl_;
+  std::lock_guard<std::mutex> lk(I.mtx);
+  I.tunnel = t;
 }
 
 bool ImportManager::enabled() const { return impl_->enabled; }
@@ -420,18 +460,29 @@ void ImportManager::attach_for_session(std::size_t session_id, int timeout_ms) {
     I.detach_all();
   I.session = session_id;
 
+  auto tr = I.pick_transport();
+  if (!tr) {
+    logs::log(logs::debug, "[USBIP] session {}: no transport (no tunnel client, no DIRECT)", session_id);
+    return;
+  }
+  auto want = tr->busids();
+  if (want.empty()) {
+    logs::log(logs::info, "[USBIP] session {}: {} offers no devices", session_id, tr->describe());
+    return;
+  }
+
   int n = 0;
-  for (const auto &busid : I.busids) {
+  for (const auto &busid : want) {
     if (n >= I.max_devices) {
       logs::log(logs::warning, "[USBIP] device cap {} reached; skipping {}", I.max_devices, busid);
       break;
     }
     // A controller that does not arrive must never fail the stream.
-    if (I.import_one(busid, timeout_ms))
+    if (I.import_one(*tr, busid, timeout_ms))
       n++;
   }
-  if (n)
-    logs::log(logs::info, "[USBIP] session {}: {} device(s) imported", session_id, n);
+  logs::log(n ? logs::info : logs::warning, "[USBIP] session {}: {} of {} device(s) imported via {}",
+            session_id, n, want.size(), tr->describe());
 }
 
 void ImportManager::reconcile_session(std::size_t session_id) {
@@ -461,9 +512,15 @@ void ImportManager::reconcile_session(std::size_t session_id) {
   if (lost.empty())
     return;
 
+  auto tr = I.pick_transport();
+  if (!tr) {
+    logs::log(logs::warning, "[USBIP] resume: {} device(s) lost but no transport to re-import them",
+              lost.size());
+    return;
+  }
   logs::log(logs::info, "[USBIP] resume: re-importing {} device(s) whose link died", lost.size());
   for (const auto &busid : lost)
-    I.import_one(busid, 3000);
+    I.import_one(*tr, busid, 3000);
   I.record_ports();
 }
 

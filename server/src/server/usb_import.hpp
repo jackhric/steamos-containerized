@@ -21,6 +21,8 @@
 
 namespace usbip {
 
+class TunnelServer;
+
 class ImportManager {
 public:
   static ImportManager &instance();
@@ -30,6 +32,11 @@ public:
   void init();
 
   bool enabled() const;
+
+  // Optional. When a tunnel client is connected it takes precedence over DIRECT: it is
+  // authenticated and its device list came from the user's own filter UI, so we never import
+  // something they did not tick. The pointer must outlive the manager (main.cpp owns it).
+  void set_tunnel(TunnelServer *tunnel);
 
   // Detach anything a previous run of this process left attached. vhci is host-global and
   // unnamespaced, so an attachment outlives us; only ports WE recorded are touched.

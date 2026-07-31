@@ -20,7 +20,8 @@ XML serverinfo(bool isServerBusy,
                const std::vector<DisplayMode> &display_modes,
                int pair_status,
                bool support_hevc,
-               bool support_av1) {
+               bool support_av1,
+               int usb_bridge_port) {
   XML resp;
 
   resp.put("root.<xmlattr>.status_code", 200);
@@ -59,6 +60,9 @@ XML serverinfo(bool isServerBusy,
   }
 
   resp.add_child("root.SupportedDisplayMode", display_nodes);
+  resp.put("root.UsbBridgePort", usb_bridge_port);
+  resp.put("root.UsbBridgeProtocols", usb_bridge_port ? "usbip/1" : "");
+
   resp.put("root.PairStatus", pair_status);
   resp.put("root.currentgame", current_appid);
   resp.put("root.state", isServerBusy ? "SUNSHINE_SERVER_BUSY" : "SUNSHINE_SERVER_FREE");

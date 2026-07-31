@@ -38,7 +38,10 @@ XML serverinfo(bool isServerBusy,
                const std::vector<DisplayMode> &display_modes,
                int pair_status,
                bool support_hevc,
-               bool support_av1);
+               bool support_av1,
+               // USB peripheral forwarding. 0 means "not available" -- advertising the real port
+               // only when vhci_hcd is actually loaded is what stops a client dialling a dead one.
+               int usb_bridge_port = 0);
 
 namespace pair {
 

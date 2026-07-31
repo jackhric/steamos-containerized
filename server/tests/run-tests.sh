@@ -17,8 +17,8 @@ RESULTS="$BUILD/results"
 mkdir -p "$OUT" "$PEG" "$BUILD" "$RESULTS"
 rm -f "$RESULTS"/*
 
-UNIT_TARGETS="test_pairing test_rtsp test_control test_resume_key test_fec test_aes test_xml test_session_key test_usbip_proto test_vhci test_fake_udev test_usb_discovery test_usb_import_plan"
-INTEG_BIN_TARGETS="test_uinput"
+UNIT_TARGETS="test_pairing test_rtsp test_control test_resume_key test_fec test_aes test_xml test_session_key test_usbip_proto test_vhci test_fake_udev test_usb_discovery test_usb_import_plan test_usb_tunnel_framing test_usb_handshake"
+INTEG_BIN_TARGETS="test_uinput test_usb_tunnel"
 
 # Offline dependency extraction (same no-clone pattern as build-server.sh).
 extract_dep() { # <check-file> <src-in-image> <dest>
@@ -58,6 +58,12 @@ docker run --rm \
     cd /build
     ctest -L unit --output-on-failure 2>&1 | tee /results/unit.log
     echo \"UNIT_RC=\${PIPESTATUS[0]}\" > /results/unit.rc
+
+    # The tunnel test needs loopback sockets but no GPU, no device and no root, so it runs here
+    # rather than behind the GPU gate. (test_fake_udev_netlink is labelled separately: broadcasting
+    # to a netlink group needs CAP_NET_ADMIN, which this build container does not have.)
+    ctest -L tunnel --output-on-failure 2>&1 | tee /results/tunnel.log || true
+    echo \"TUNNEL_RC=\${PIPESTATUS[0]}\" > /results/tunnel.rc
   "
 UNIT_DOCKER_RC=$?
 
@@ -108,6 +114,15 @@ if [[ -f "$RESULTS/unit.log" ]]; then
     if grep -q "Passed" <<<"$line"; then PASS=$((PASS+1)); LINES+=("  PASS [unit]        $name");
     else LINES+=("  FAIL [unit]        $name"); fi
   done < <(grep -E 'Test +#[0-9]+:' "$RESULTS/unit.log")
+fi
+
+if [[ -f "$RESULTS/tunnel.log" ]]; then
+  while IFS= read -r line; do
+    name=$(sed -E 's/.*Test #[0-9]+: ([A-Za-z0-9_]+) .*/\1/' <<<"$line")
+    TOTAL=$((TOTAL+1))
+    if grep -qE "Passed|Skipped" <<<"$line"; then PASS=$((PASS+1)); LINES+=("  PASS [tunnel]      $name");
+    else LINES+=("  FAIL [tunnel]      $name"); fi
+  done < <(grep -E 'Test +#[0-9]+:' "$RESULTS/tunnel.log")
 fi
 
 if [[ "$INTEG_RAN" == "1" ]]; then

@@ -62,6 +62,23 @@ int main() {
       if (c.first == "DisplayMode")
         n_modes++;
     CHECK(n_modes == 2, "two SupportedDisplayMode entries");
+    // Default: no USB bridge. A client must read 0 and not dial anything.
+    CHECK(rp.get<int>("root.UsbBridgePort") == 0, "UsbBridgePort 0 when USB forwarding is off");
+    CHECK(rp.get<std::string>("root.UsbBridgeProtocols", "").empty(),
+          "no protocols advertised when the port is 0");
+  }
+
+  std::printf("\n== serverinfo XML (USB bridge advertised) ==\n");
+  {
+    // This is the contract the client fork parses to decide whether to offer USB forwarding at
+    // all, so it is pinned here rather than discovered by a client failing in the field.
+    std::vector<moonlight::DisplayMode> modes = {{1920, 1080, 60}};
+    auto xml = moonlight::serverinfo(false, 0, 47984, 47989, "u", "h", "m", "127.0.0.1", modes, 1, false, false,
+                                     /*usb_bridge_port*/ 48011);
+    pt::ptree rp;
+    CHECK(well_formed(xml, rp), "serverinfo with a USB bridge is well-formed");
+    CHECK(rp.get<int>("root.UsbBridgePort") == 48011, "UsbBridgePort carries the listening port");
+    CHECK(rp.get<std::string>("root.UsbBridgeProtocols") == "usbip/1", "UsbBridgeProtocols is usbip/1");
   }
 
   std::printf("\n== serverinfo XML (busy) ==\n");

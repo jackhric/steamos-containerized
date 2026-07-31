@@ -17,6 +17,7 @@
 #include <server/state.hpp>
 #include <server/uinput.hpp>
 #include <server/usb_import.hpp>
+#include <server/usb_tunnel.hpp>
 #include <thread>
 
 static std::string env_or(const char *k, const std::string &def) {
@@ -96,10 +97,24 @@ int main() {
 
   // USB/IP device import. Reap first: vhci is host-global and unnamespaced, so an attachment
   // from a previous run of this process outlives it.
+  usbip::TunnelServer usb_tunnel;
   {
     auto &usb = usbip::ImportManager::instance();
     usb.init();
     usb.reap_stale();
+
+    // The tunnel only makes sense if there is somewhere to put a device, so it follows vhci.
+    if (usb.enabled() && env_or("STEAM_STREAM_USBIP_TUNNEL", "1") != "0") {
+      int port = std::stoi(env_or("STEAM_STREAM_USBIP_PORT", std::to_string(usbip::tunnel::kDefaultPort)));
+      auto verify = [&state](const x509::x509_ptr &cert) {
+        return state.get_client_via_ssl(cert).has_value();
+      };
+      if (usb_tunnel.start(port, state.cert_path, state.key_path, verify)) {
+        usb.set_tunnel(&usb_tunnel);
+        // Only now is the port worth advertising; a client that dials a dead one just waits.
+        state.usb_bridge_port = port;
+      }
+    }
   }
 
   auto media_mtx = std::make_shared<std::mutex>();

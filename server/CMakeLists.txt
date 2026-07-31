@@ -131,6 +131,9 @@ if(BUILD_SERVER)
             ${SRC}/server/usb_discovery.cpp
             ${SRC}/server/usb_import_plan.cpp
             ${SRC}/server/usb_import.cpp
+            ${SRC}/server/usb_handshake.cpp
+            ${SRC}/server/usb_tunnel_proto.cpp
+            ${SRC}/server/usb_tunnel.cpp
             ${SERVER_PROTO})
 
     target_include_directories(steam-stream-server PRIVATE
@@ -247,6 +250,19 @@ if(BUILD_SERVER)
             ${SRC}/server/fake_udev_props.cpp)
     target_include_directories(test_usb_import_plan PRIVATE ${SRC})
 
+    # -- USB/IP: tunnel wire format. Pure, and doubles as the contract the client fork is
+    #    reimplemented against -- it shares no code with us, only these bytes. --
+    add_executable(test_usb_tunnel_framing ${TESTS}/unit/test_usb_tunnel_framing.cpp
+            ${SRC}/server/usb_tunnel_proto.cpp)
+    target_include_directories(test_usb_tunnel_framing PRIVATE ${SRC})
+
+    # -- USB/IP: the OP_REQ_IMPORT exchange over a fake Channel. Pure: the transport seam is what
+    #    makes this testable, and the REFUSED branch (header only, no body) is the one that would
+    #    otherwise hang an import until the socket timed out. --
+    add_executable(test_usb_handshake ${TESTS}/unit/test_usb_handshake.cpp
+            ${SRC}/server/usb_handshake.cpp ${SRC}/server/usbip_proto.cpp)
+    target_include_directories(test_usb_handshake PRIVATE ${SRC})
+
     # -- M4: uinput device-creation smoke test (needs --device /dev/uinput at runtime). --
     add_executable(test_uinput ${TESTS}/integration/test_uinput.cpp ${SRC}/server/uinput.cpp
             ${SRC}/server/fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
@@ -265,10 +281,23 @@ if(BUILD_SERVER)
     target_link_libraries(test_fake_udev_netlink PRIVATE ${CMAKE_DL_LIBS}
             Boost::log Boost::log_setup Boost::thread Boost::system Threads::Threads)
 
+    # -- USB/IP: the mTLS tunnel against a stub client. Loopback sockets and generated certs only
+    #    -- no GPU, no kernel module, no root -- so it sits in the cheap "netlink" tier rather
+    #    than behind the GPU gate. Its real job is the rejection cases. --
+    add_executable(test_usb_tunnel ${TESTS}/integration/test_usb_tunnel.cpp
+            ${SRC}/server/usb_tunnel.cpp ${SRC}/server/usb_tunnel_proto.cpp)
+    target_include_directories(test_usb_tunnel PRIVATE ${SRC} ${MP}/crypto)
+    target_compile_definitions(test_usb_tunnel PRIVATE FMT_HEADER_ONLY=1 BOOST_LOG_DYN_LINK=1)
+    target_link_libraries(test_usb_tunnel PRIVATE
+            wolf_crypto OpenSSL::SSL OpenSSL::Crypto
+            Boost::log Boost::log_setup Boost::thread Boost::system Threads::Threads)
+
     # -- USB/IP: drives ImportManager standalone (no client, no stream). Needs root + vhci +
     #    a reachable usbipd, so it is not registered with ctest; run it inside the container. --
     add_executable(test_usbip_import ${TESTS}/integration/test_usbip_import.cpp
             ${SRC}/server/usb_import.cpp ${SRC}/server/usb_import_plan.cpp
+            ${SRC}/server/usb_handshake.cpp ${SRC}/server/usb_tunnel.cpp
+            ${SRC}/server/usb_tunnel_proto.cpp
             ${SRC}/server/usb_discovery.cpp ${SRC}/server/usbip_proto.cpp
             ${SRC}/server/vhci.cpp ${SRC}/server/vhci_io.cpp
             ${SRC}/server/fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
@@ -289,7 +318,8 @@ if(BUILD_SERVER)
     # ---- ctest registration ----
     # UNIT tier: pure, runs anywhere (CPU-only, no devices). `ctest -L unit`.
     foreach(t test_pairing test_rtsp test_control test_resume_key test_fec test_aes test_xml test_session_key
-              test_usbip_proto test_vhci test_fake_udev test_usb_discovery test_usb_import_plan)
+              test_usbip_proto test_vhci test_fake_udev test_usb_discovery test_usb_import_plan
+              test_usb_tunnel_framing test_usb_handshake)
         add_test(NAME ${t} COMMAND ${t})
         set_tests_properties(${t} PROPERTIES LABELS "unit")
     endforeach()
@@ -303,4 +333,7 @@ if(BUILD_SERVER)
     # much cheaper container than the integration tier. `ctest -L netlink`.
     add_test(NAME test_fake_udev_netlink COMMAND test_fake_udev_netlink)
     set_tests_properties(test_fake_udev_netlink PROPERTIES LABELS "netlink" SKIP_RETURN_CODE 77)
+
+    add_test(NAME test_usb_tunnel COMMAND test_usb_tunnel)
+    set_tests_properties(test_usb_tunnel PROPERTIES LABELS "tunnel" SKIP_RETURN_CODE 77)
 endif()
