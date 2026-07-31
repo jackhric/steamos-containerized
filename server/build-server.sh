@@ -43,9 +43,9 @@ docker run --rm \
       -DBUILD_SERVER=ON -DSIMPLE_WEB_SERVER_DIR=/sws -DPEGLIB_DIR=/peg -DENET_DIR=/enet
     cmake --build /tmp/build -j"$(nproc)" \
       --target steam-stream-server test_pairing test_rtsp test_control \
-               test_fec test_aes test_xml test_session_key test_uinput
+               test_fec test_aes test_xml test_session_key test_uinput test_chord
     for b in steam-stream-server test_pairing test_rtsp test_control \
-             test_fec test_aes test_xml test_session_key test_uinput; do
+             test_fec test_aes test_xml test_session_key test_uinput test_chord; do
       cp -v "/tmp/build/$b" /out/
     done
   '

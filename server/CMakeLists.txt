@@ -221,6 +221,15 @@ if(BUILD_SERVER)
     target_link_libraries(test_uinput PRIVATE
             Boost::log Boost::log_setup Boost::thread Boost::system Threads::Threads)
 
+    # Drives synthetic Guide chords into a virtual pad; not registered with ctest
+    # since it needs a live Steam session to observe.
+    add_executable(test_chord ${TESTS}/integration/test_chord.cpp ${SRC}/server/uinput.cpp
+            ${SRC}/server/fake_udev.cpp)
+    target_include_directories(test_chord PRIVATE ${SRC})
+    target_compile_definitions(test_chord PRIVATE FMT_HEADER_ONLY=1 BOOST_LOG_DYN_LINK=1)
+    target_link_libraries(test_chord PRIVATE
+            Boost::log Boost::log_setup Boost::thread Boost::system Threads::Threads)
+
     # ---- ctest registration ----
     # UNIT tier: pure, runs anywhere (CPU-only, no devices). `ctest -L unit`.
     foreach(t test_pairing test_rtsp test_control test_resume_key test_fec test_aes test_xml test_session_key)
