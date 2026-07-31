@@ -4,9 +4,10 @@
 
 # SteamOS™ Containerized
 
-This repo allows you to run the SteamOS interface as a headless Docker container, just as if you had a Steam Deck or Steam Machine. 
+This repo allows you to run the SteamOS platform as a headless Docker container, and stream games to your devices (TV, phone, etc.) just as if you had a Steam Deck or Steam Machine. 
 
 ## Features
+* Containerized platform: Keep using your desktop for other things while playing games, no more closing out of windows
 * Moonlight compatibility built right in: stream with ultra-low latency
 * Functional MangoHUD: monitor frametimes and other metrics easily right in SteamOS
 * Gamescope session: fully navigatable with a controller, no more keyboards at the couch
