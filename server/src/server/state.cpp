@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <helpers/logger.hpp>
@@ -6,6 +7,7 @@
 #include <random>
 #include <server/state.hpp>
 #include <sstream>
+#include <stdexcept>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -24,9 +26,23 @@ static std::string read_file(const std::string &path) {
   return ss.str();
 }
 
+// Write-then-rename: a crash or full disk mid-write leaves the previous file intact rather than
+// a truncated one, which startup would read as "identity missing" and regenerate over.
 static void write_file(const std::string &path, const std::string &data) {
-  std::ofstream f(path, std::ios::binary | std::ios::trunc);
-  f << data;
+  auto tmp = path + ".tmp";
+  {
+    std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+    f << data;
+    f.flush();
+    if (!f) {
+      logs::log(logs::error, "Failed writing {}", tmp);
+      return;
+    }
+  }
+  std::error_code ec;
+  fs::rename(tmp, path, ec);
+  if (ec)
+    logs::log(logs::error, "Failed renaming {} -> {}: {}", tmp, path, ec.message());
 }
 
 static std::string gen_uuid() {
@@ -74,6 +90,13 @@ static std::string first_mac() {
   return result;
 }
 
+// A truncated file (interrupted write, wiped-and-recreated dir) must count as absent, or we
+// load a half-written key and fail much later with a useless error.
+static bool file_ok(const fs::path &p) {
+  std::error_code ec;
+  return fs::is_regular_file(p, ec) && fs::file_size(p, ec) > 0;
+}
+
 AppState AppState::init(const std::string &state_dir) {
   fs::create_directories(state_dir);
   fs::create_directories(state_dir + "/clients");
@@ -83,8 +106,44 @@ AppState AppState::init(const std::string &state_dir) {
   s.cert_path = state_dir + "/cert.pem";
   s.key_path = state_dir + "/key.pem";
 
-  if (!x509::cert_exists(s.key_path, s.cert_path)) {
-    logs::log(logs::info, "Generating new server certificate at {}", s.cert_path);
+  // Load the paired clients first: whether any exist decides how loud we have to be about
+  // minting a new server identity, which would orphan every one of them.
+  for (auto &entry : fs::directory_iterator(state_dir + "/clients")) {
+    if (entry.path().extension() == ".pem") {
+      auto pem = read_file(entry.path().string());
+      if (!pem.empty())
+        s.paired_clients_.push_back(pem);
+    }
+  }
+  logs::log(logs::info, "Loaded {} paired client(s) from {}", s.paired_clients_.size(), state_dir + "/clients");
+
+  const bool have_key = file_ok(s.key_path);
+  const bool have_cert = file_ok(s.cert_path);
+  const bool allow_new = std::getenv("STEAM_STREAM_ALLOW_NEW_IDENTITY") != nullptr;
+
+  // Exactly one half present means corrupted or partially-deleted state. Regenerating both
+  // (the old behaviour) silently invalidates every pairing, so refuse instead.
+  if (have_key != have_cert && !allow_new) {
+    logs::log(logs::error,
+              "Inconsistent server identity in {}: key.pem present={} cert.pem present={}. Refusing to "
+              "regenerate -- that would invalidate all {} paired client(s). Restore the missing file from "
+              "a backup, or delete the surviving one and set STEAM_STREAM_ALLOW_NEW_IDENTITY=1 to start "
+              "a deliberately fresh identity.",
+              state_dir, have_key, have_cert, s.paired_clients_.size());
+    throw std::runtime_error("inconsistent server identity in " + state_dir);
+  }
+
+  if (!have_key || !have_cert) {
+    if (!s.paired_clients_.empty()) {
+      logs::log(logs::error,
+                "No server certificate in {} but {} paired client(s) on disk -- generating a NEW server "
+                "identity. Every client will have to re-pair. If this is unexpected your state dir was "
+                "wiped: stop the container now and restore {} from a backup.",
+                state_dir, s.paired_clients_.size(), state_dir);
+    }
+    logs::log(logs::warning, "Generating a NEW server certificate at {} -- any existing Moonlight pairings "
+                             "will be invalidated",
+              s.cert_path);
     auto pkey = x509::generate_key();
     auto cert = x509::generate_x509(pkey);
     x509::write_to_disk(pkey, s.key_path, cert, s.cert_path);
@@ -93,9 +152,13 @@ AppState AppState::init(const std::string &state_dir) {
   s.server_cert = x509::cert_from_file(s.cert_path);
 
   auto uuid_path = state_dir + "/uuid";
-  if (fs::exists(uuid_path)) {
+  if (file_ok(uuid_path)) {
     s.uuid = read_file(uuid_path);
   } else {
+    if (!s.paired_clients_.empty())
+      logs::log(logs::error, "{} is missing but {} paired client(s) exist -- Moonlight will see this as a "
+                             "brand-new host",
+                uuid_path, s.paired_clients_.size());
     s.uuid = gen_uuid();
     write_file(uuid_path, s.uuid);
   }
@@ -107,15 +170,6 @@ AppState AppState::init(const std::string &state_dir) {
 
   s.display_modes = {{1920, 1080, 60}, {1280, 720, 60}};
   s.apps = {{"Steam Big Picture", "1", false}, {"Steam Desktop", "2", false}};
-
-  for (auto &entry : fs::directory_iterator(state_dir + "/clients")) {
-    if (entry.path().extension() == ".pem") {
-      auto pem = read_file(entry.path().string());
-      if (!pem.empty())
-        s.paired_clients_.push_back(pem);
-    }
-  }
-  logs::log(logs::info, "Loaded {} paired client(s) from {}", s.paired_clients_.size(), state_dir + "/clients");
 
   return s;
 }

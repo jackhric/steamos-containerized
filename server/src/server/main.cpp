@@ -3,9 +3,11 @@
 #include <csignal>
 #include <cstdlib>
 #include <helpers/logger.hpp>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <server/control.hpp>
 #include <server/encoder_config.hpp>
 #include <server/media.hpp>
@@ -41,7 +43,26 @@ int main() {
   logs::init(logs::parse_level(env_or("STEAM_STREAM_LOG_LEVEL", "INFO")));
 
   auto state_dir = env_or("STEAM_STREAM_STATE_DIR", "/var/lib/steam-stream");
-  auto state = state::AppState::init(state_dir);
+
+  // Same st_dev as "/" means the state dir sits on the container's writable layer: it survives
+  // a restart but is destroyed by `docker rm` / --force-recreate, taking every pairing with it.
+  {
+    struct stat sd{}, root{};
+    if (::stat(state_dir.c_str(), &sd) == 0 && ::stat("/", &root) == 0 && sd.st_dev == root.st_dev)
+      logs::log(logs::warning,
+                "state dir {} is NOT on a mounted volume -- the server identity and all Moonlight "
+                "pairings will be lost when this container is recreated",
+                state_dir);
+  }
+
+  std::optional<state::AppState> state_opt;
+  try {
+    state_opt = state::AppState::init(state_dir);
+  } catch (const std::exception &e) {
+    logs::log(logs::error, "cannot initialise state from {}: {}", state_dir, e.what());
+    return 1;
+  }
+  auto &state = *state_opt;
   state.http_port = std::stoi(env_or("STEAM_STREAM_HTTP_PORT", "47989"));
   state.https_port = std::stoi(env_or("STEAM_STREAM_HTTPS_PORT", "47984"));
   state.rtsp_port = std::stoi(env_or("STEAM_STREAM_RTSP_PORT", "48010"));

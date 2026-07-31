@@ -1,6 +1,7 @@
 #include <crypto/crypto.hpp>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
@@ -111,41 +112,54 @@ pkey_ptr pkey_from_file(std::string_view pkey_path) {
 }
 
 bool write_to_disk(pkey_ptr pkey, std::string_view pkey_filename, x509_ptr x509, std::string_view cert_filename) {
-  /* Open the PEM file for writing the key to disk. */
-  FILE *pkey_file = fopen(pkey_filename.data(), "wb");
-  if (!pkey_file) {
-    throw std::runtime_error("Unable write file to disk.");
+  // Both halves are written to temporaries and renamed into place only once both succeeded:
+  // a key without its cert (or vice versa) is unrecoverable state that startup refuses to load.
+  const std::string pkey_path{pkey_filename}, cert_path{cert_filename};
+  const std::string pkey_tmp = pkey_path + ".tmp", cert_tmp = cert_path + ".tmp";
+
+  auto write_pem = [](const std::string &path, const auto &writer) {
+    FILE *f = fopen(path.c_str(), "wb");
+    if (!f) {
+      throw std::runtime_error("Unable to open " + path + " for writing.");
+    }
+    bool ok = writer(f);
+    fclose(f);
+    if (!ok) {
+      std::error_code ec;
+      std::filesystem::remove(path, ec);
+      throw std::runtime_error("Unable to write " + path + " to disk.");
+    }
+  };
+
+  write_pem(pkey_tmp, [&](FILE *f) {
+    return PEM_write_PrivateKey(f, pkey.get(), nullptr, nullptr, 0, nullptr, nullptr) != 0;
+  });
+  write_pem(cert_tmp, [&](FILE *f) { return PEM_write_X509(f, x509.get()) != 0; });
+
+  std::error_code ec;
+  std::filesystem::rename(pkey_tmp, pkey_path, ec);
+  if (ec) {
+    throw std::runtime_error("Unable to install " + pkey_path + ": " + ec.message());
   }
-
-  /* Write the key to disk. */
-  bool ret = PEM_write_PrivateKey(pkey_file, pkey.get(), nullptr, nullptr, 0, nullptr, nullptr);
-  fclose(pkey_file);
-
-  if (!ret) {
-    throw std::runtime_error("Unable to write file to disk.");
-  }
-
-  /* Open the PEM file for writing the certificate to disk. */
-  FILE *x509_file = fopen(cert_filename.data(), "wb");
-  if (!x509_file) {
-    throw std::runtime_error("Unable to write file to disk.");
-  }
-
-  /* Write the certificate to disk. */
-  ret = PEM_write_X509(x509_file, x509.get());
-  fclose(x509_file);
-
-  if (!ret) {
-    throw std::runtime_error("Unable to write {} to disk.");
+  std::filesystem::rename(cert_tmp, cert_path, ec);
+  if (ec) {
+    throw std::runtime_error("Unable to install " + cert_path + ": " + ec.message());
   }
 
   return true;
 }
 
 bool cert_exists(std::string_view pkey_filename, std::string_view cert_filename) {
-  std::fstream pkey_fs(pkey_filename.data());
-  std::fstream cert_fs(cert_filename.data());
-  return pkey_fs.good() && cert_fs.good();
+  // std::fstream's default openmode is in|out, so a present-but-unwritable file reads as
+  // missing -- and the caller's response to "missing" is to regenerate the server identity
+  // over it. Ask the filesystem instead, and treat a zero-byte file (interrupted write) as
+  // absent so we never load a truncated key.
+  auto ok = [](std::string_view p) {
+    std::error_code ec;
+    std::filesystem::path path{std::string(p)};
+    return std::filesystem::is_regular_file(path, ec) && std::filesystem::file_size(path, ec) > 0;
+  };
+  return ok(pkey_filename) && ok(cert_filename);
 }
 
 std::string get_cert_signature(x509_ptr cert) {
