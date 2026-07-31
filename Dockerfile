@@ -59,8 +59,18 @@ ENV GST_PLUGIN_PATH=/usr/local/lib/x86_64-linux-gnu/gstreamer-1.0 \
     # use glamor instead of falling back to software.
     GOW_REQUIRED_DEVICES="/dev/uinput /dev/input/event* /dev/dri/renderD128 /dev/dri/renderD129 /dev/dri/card0 /dev/dri/card1 /dev/dri/card2"
 
+# The home-wipe fix works by overwriting the base image's cont-init script path-for-path. If GOW
+# ever renames it, fail the build rather than silently re-enable its `userdel -r $HOME`.
+RUN test -f /etc/cont-init.d/10-setup_user.sh \
+ || { echo "FATAL: base image no longer ships /etc/cont-init.d/10-setup_user.sh"; exit 1; }
+
 COPY rootfs/ /
+
+# The `^[^#]*` anchor keeps the check off comment lines (this file documents the bug it fixes).
+RUN grep -q 'steam-stream-safe-setup-user' /etc/cont-init.d/10-setup_user.sh \
+ && ! grep -rE '^[^#]*userdel[^#]*-r' /etc/cont-init.d/
+
 RUN chmod +x /opt/steam-stream/entrypoint.sh /opt/steam-stream/pulse-sink.sh \
-    /opt/steam-stream/startup-app.sh
+    /opt/steam-stream/startup-app.sh /etc/cont-init.d/10-setup_user.sh
 
 ENTRYPOINT ["/opt/steam-stream/entrypoint.sh"]
