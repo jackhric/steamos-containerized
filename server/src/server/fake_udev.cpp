@@ -20,39 +20,7 @@ namespace fake_udev {
 
 namespace {
 
-const char *kUdevDataDir = "/run/udev/data";
 const char *kUdevCtrlPath = "/run/udev/control";
-
-// MurmurHash2 (public domain, Austin Appleby) -- libudev hashes the subsystem string with this
-// into the netlink header so kernel socket filters can match it. Must be byte-identical to
-// systemd's, so this is copied verbatim from Wolf's fake-udev.
-std::uint32_t murmur2(const void *key, int len, std::uint32_t seed) {
-  const std::uint32_t m = 0x5bd1e995;
-  const int r = 24;
-  std::uint32_t h = seed ^ len;
-  const unsigned char *data = static_cast<const unsigned char *>(key);
-  while (len >= 4) {
-    std::uint32_t k;
-    std::memcpy(&k, data, 4);
-    k *= m;
-    k ^= k >> r;
-    k *= m;
-    h *= m;
-    h ^= k;
-    data += 4;
-    len -= 4;
-  }
-  switch (len) {
-  case 3: h ^= data[2] << 16; [[fallthrough]];
-  case 2: h ^= data[1] << 8;  [[fallthrough]];
-  case 1: h ^= data[0];
-    h *= m;
-  }
-  h ^= h >> 13;
-  h *= m;
-  h ^= h >> 15;
-  return h;
-}
 
 // systemd device-monitor netlink header (see sd-device/device-monitor.c). Field order/sizes are
 // ABI with libudev subscribers, so it must match exactly.
@@ -68,55 +36,17 @@ struct MonitorNetlinkHeader {
   unsigned filter_tag_bloom_lo;
 };
 
-std::vector<std::string> class_props(const Device &dev) {
-  if (dev.id_input_class == "mouse")
-    return {"ID_INPUT_MOUSE"};
-  if (dev.id_input_class == "keyboard")
-    return {"ID_INPUT_KEYBOARD", "ID_INPUT_KEY"};
-  return {"ID_INPUT_JOYSTICK"};
-}
-
-// The udev "add"/"remove" event properties. Mirrors Wolf's gen_udev_base_event + the
-// ID_INPUT_* tags SDL/libinput key off of.
-std::map<std::string, std::string> base_event(const Device &dev, const char *action) {
-  auto now = std::chrono::system_clock::now();
-  auto ts = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
-  std::map<std::string, std::string> ev = {
-      {"ACTION", action},
-      {"SEQNUM", "7"}, // no global seqnum state; udev subscribers don't require monotonicity here
-      {"USEC_INITIALIZED", std::to_string(ts)},
-      {"SUBSYSTEM", "input"},
-      {"ID_INPUT", "1"},
-      {"ID_SERIAL", "noserial"},
-      {"TAGS", ":seat:uaccess:"},
-      {"CURRENT_TAGS", ":seat:uaccess:"},
-      {"DEVNAME", dev.devnode},
-      {"DEVPATH", dev.syspath},
-      {"MAJOR", std::to_string(dev.major)},
-      {"MINOR", std::to_string(dev.minor)},
-  };
-  for (const auto &p : class_props(dev))
-    ev[p] = "1";
-  return ev;
-}
-
-// udev property payload: NUL-separated KEY=VALUE pairs, trailing NUL.
-std::string serialize_props(const std::map<std::string, std::string> &props) {
-  std::string out;
-  for (const auto &[k, v] : props) {
-    out += k;
-    out += '=';
-    out += v;
-    out += '\0';
-  }
-  return out;
-}
-
 // UDEV_MONITOR_UDEV: the multicast group libudev/SDL subscribers listen on. (Group 1 is the raw
 // KERNEL group, which libudev subscribers ignore.)
 constexpr unsigned kUdevMonitorGroup = 2;
 
-bool send_uevent(const std::map<std::string, std::string> &props) {
+} // namespace
+
+
+
+namespace {
+
+bool send_uevent(const Device &dev, const std::map<std::string, std::string> &props) {
   int fd = ::socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_KOBJECT_UEVENT);
   if (fd < 0) {
     logs::log(logs::warning, "[FAKE-UDEV] netlink socket failed: {}", std::strerror(errno));
@@ -133,13 +63,21 @@ bool send_uevent(const std::map<std::string, std::string> &props) {
     return false;
   }
 
-  std::string payload = serialize_props(props);
+  std::string payload = detail::serialize_props(props);
   MonitorNetlinkHeader header{};
   header.magic = htobe32(0xfeedcafe);
   header.header_size = sizeof(header);
   header.properties_off = sizeof(header);
   header.properties_len = static_cast<unsigned>(payload.size());
-  header.filter_subsystem_hash = htobe32(murmur2("input", 5, 0));
+  // Subscribers install a BPF socket filter derived from these hashes. Get one wrong and the
+  // KERNEL drops the message before the subscriber ever sees it -- no error, nothing logged,
+  // the device simply never appears. SDL calls filter_add_match_subsystem_devtype("hidraw", NULL),
+  // so devtype is only compared when the subscriber asked for one.
+  header.filter_subsystem_hash =
+      htobe32(detail::murmur2(dev.subsystem.data(), static_cast<int>(dev.subsystem.size()), 0));
+  if (!dev.devtype.empty())
+    header.filter_devtype_hash =
+        htobe32(detail::murmur2(dev.devtype.data(), static_cast<int>(dev.devtype.size()), 0));
 
   iovec iov[2] = {
       {&header, sizeof(header)},
@@ -164,37 +102,21 @@ bool send_uevent(const std::map<std::string, std::string> &props) {
   return ok;
 }
 
-std::string hwdb_path(const Device &dev) {
-  return std::string(kUdevDataDir) + "/c" + std::to_string(dev.major) + ":" +
-         std::to_string(dev.minor);
-}
-
 void write_hwdb(const Device &dev) {
   std::error_code ec;
-  std::filesystem::create_directories(kUdevDataDir, ec);
-  auto path = hwdb_path(dev);
+  std::filesystem::create_directories(detail::kUdevDataDir, ec);
+  auto path = detail::hwdb_path(dev);
   std::ofstream f(path, std::ios::trunc);
   if (!f) {
     logs::log(logs::warning, "[FAKE-UDEV] cannot write hwdb {}: {}", path, std::strerror(errno));
     return;
   }
-  // Matches Wolf's get_udev_hw_db_entries. E: exported props, G/Q: tags, V: version.
-  // The mere existence of this file also makes udev_device_get_is_initialized() true,
-  // which libinput requires before it will accept a path-added device.
-  f << "E:ID_INPUT=1\n";
-  for (const auto &p : class_props(dev))
-    f << "E:" << p << "=1\n";
-  f << "E:ID_BUS=usb\n"
-       "G:seat\n"
-       "G:uaccess\n"
-       "Q:seat\n"
-       "Q:uaccess\n"
-       "V:1\n";
+  f << detail::hwdb_contents(dev);
 }
 
 void remove_hwdb(const Device &dev) {
   std::error_code ec;
-  std::filesystem::remove(hwdb_path(dev), ec);
+  std::filesystem::remove(detail::hwdb_path(dev), ec);
 }
 
 // libudev decides a udev daemon is running by the presence of /run/udev/control; without it,
@@ -275,15 +197,17 @@ bool device_from_event_node(const std::string &devnode, Device &out) {
 void plug(const Device &dev) {
   ensure_udev_control();
   write_hwdb(dev);
-  bool sent = send_uevent(base_event(dev, "add"));
-  logs::log(logs::info, "[FAKE-UDEV] plug {} (c{}:{}) uevent={}", dev.devnode, dev.major, dev.minor,
-            sent ? "sent" : "FAILED");
+  bool sent = send_uevent(dev, detail::base_event(dev, "add"));
+  logs::log(logs::info, "[FAKE-UDEV] plug {} [{}{}] {} uevent={}", detail::hwdb_path(dev),
+            dev.subsystem, dev.devtype.empty() ? "" : "/" + dev.devtype,
+            dev.has_node() ? dev.devnode : dev.sysname, sent ? "sent" : "FAILED");
 }
 
 void unplug(const Device &dev) {
-  send_uevent(base_event(dev, "remove"));
+  send_uevent(dev, detail::base_event(dev, "remove"));
   remove_hwdb(dev);
-  logs::log(logs::info, "[FAKE-UDEV] unplug {}", dev.devnode);
+  logs::log(logs::info, "[FAKE-UDEV] unplug {} [{}]",
+            dev.has_node() ? dev.devnode : dev.sysname, dev.subsystem);
 }
 
 } // namespace fake_udev

@@ -123,7 +123,12 @@ if(BUILD_SERVER)
             ${SRC}/server/control.cpp
             ${SRC}/server/uinput.cpp
             ${SRC}/server/fake_udev.cpp
+            ${SRC}/server/fake_udev_props.cpp
             ${SRC}/server/pointer_sync.cpp
+            ${SRC}/server/usbip_proto.cpp
+            ${SRC}/server/vhci.cpp
+            ${SRC}/server/vhci_io.cpp
+            ${SRC}/server/usb_discovery.cpp
             ${SERVER_PROTO})
 
     target_include_directories(steam-stream-server PRIVATE
@@ -213,9 +218,30 @@ if(BUILD_SERVER)
             wolf_crypto OpenSSL::SSL OpenSSL::Crypto
             Boost::thread Boost::system Threads::Threads)
 
+    # -- USB/IP: wire-format encode/decode. Pure -- links nothing, needs no kernel module. --
+    add_executable(test_usbip_proto ${TESTS}/unit/test_usbip_proto.cpp ${SRC}/server/usbip_proto.cpp)
+    target_include_directories(test_usbip_proto PRIVATE ${SRC})
+
+    # -- USB/IP: vhci status parsing + free-port selection. Pure; vhci.cpp has no I/O (that lives
+    #    in vhci_io.cpp) precisely so this test runs with the module unloaded. --
+    add_executable(test_vhci ${TESTS}/unit/test_vhci.cpp ${SRC}/server/vhci.cpp
+            ${SRC}/server/usbip_proto.cpp)
+    target_include_directories(test_vhci PRIVATE ${SRC})
+
+    # -- USB/IP: fake_udev property/hash generation, incl. a regression guard pinning the
+    #    working uinput gamepad path byte-for-byte. Pure: props TU has no I/O and no logger. --
+    add_executable(test_fake_udev ${TESTS}/unit/test_fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
+    target_include_directories(test_fake_udev PRIVATE ${SRC})
+
+    # -- USB/IP: sysfs walk for an imported device. Pure -- SysfsReader is injectable, so the
+    #    whole walk runs against a captured tree with no /sys and no root. --
+    add_executable(test_usb_discovery ${TESTS}/unit/test_usb_discovery.cpp
+            ${SRC}/server/usb_discovery.cpp)
+    target_include_directories(test_usb_discovery PRIVATE ${SRC})
+
     # -- M4: uinput device-creation smoke test (needs --device /dev/uinput at runtime). --
     add_executable(test_uinput ${TESTS}/integration/test_uinput.cpp ${SRC}/server/uinput.cpp
-            ${SRC}/server/fake_udev.cpp)
+            ${SRC}/server/fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
     target_include_directories(test_uinput PRIVATE ${SRC})
     target_compile_definitions(test_uinput PRIVATE FMT_HEADER_ONLY=1 BOOST_LOG_DYN_LINK=1)
     target_link_libraries(test_uinput PRIVATE
@@ -224,7 +250,7 @@ if(BUILD_SERVER)
     # Drives synthetic Guide chords into a virtual pad; not registered with ctest
     # since it needs a live Steam session to observe.
     add_executable(test_chord ${TESTS}/integration/test_chord.cpp ${SRC}/server/uinput.cpp
-            ${SRC}/server/fake_udev.cpp)
+            ${SRC}/server/fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
     target_include_directories(test_chord PRIVATE ${SRC})
     target_compile_definitions(test_chord PRIVATE FMT_HEADER_ONLY=1 BOOST_LOG_DYN_LINK=1)
     target_link_libraries(test_chord PRIVATE
@@ -232,7 +258,8 @@ if(BUILD_SERVER)
 
     # ---- ctest registration ----
     # UNIT tier: pure, runs anywhere (CPU-only, no devices). `ctest -L unit`.
-    foreach(t test_pairing test_rtsp test_control test_resume_key test_fec test_aes test_xml test_session_key)
+    foreach(t test_pairing test_rtsp test_control test_resume_key test_fec test_aes test_xml test_session_key
+              test_usbip_proto test_vhci test_fake_udev test_usb_discovery)
         add_test(NAME ${t} COMMAND ${t})
         set_tests_properties(${t} PROPERTIES LABELS "unit")
     endforeach()
