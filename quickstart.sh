@@ -73,9 +73,36 @@ if [ ! -e /dev/uinput ]; then
   modprobe uinput || die "could not load uinput module (custom kernel without CONFIG_INPUT_UINPUT?)"
 fi
 [ -e /dev/uinput ] || die "/dev/uinput still missing after modprobe"
-if [ -d /etc/modules-load.d ] && [ ! -e /etc/modules-load.d/steam-stream.conf ]; then
-  echo uinput > /etc/modules-load.d/steam-stream.conf
-  info "persisted uinput autoload (/etc/modules-load.d/steam-stream.conf)"
+
+# vhci_hcd is the virtual host controller that materializes a USB device imported from the
+# Moonlight client. Optional: warn rather than die, since everything else works without it.
+if [ ! -d /sys/devices/platform/vhci_hcd.0 ]; then
+  info "loading vhci-hcd kernel module (USB device passthrough)"
+  modprobe vhci-hcd 2>/dev/null || warn "vhci-hcd unavailable — USB device passthrough disabled"
+fi
+
+# Per-module and idempotent. The old form guarded the whole block on the file not existing, so an
+# upgrade over an existing install would never add a newly-required module — presenting as
+# "worked yesterday, broken after a reboot".
+if [ -d /etc/modules-load.d ]; then
+  MLD=/etc/modules-load.d/steam-stream.conf
+  touch "$MLD"
+  for _m in uinput vhci-hcd; do
+    if ! grep -qx "$_m" "$MLD"; then
+      echo "$_m" >> "$MLD"
+      info "persisted $_m autoload ($MLD)"
+    fi
+  done
+fi
+
+# hidraw's char major is allocated at boot, not fixed. Resolve it now so the generated compose
+# file authorises the right one; a wrong value shows up much later as a bare EPERM on open.
+HIDRAW_MAJOR="$(awk '$2=="hidraw"{print $1}' /proc/devices 2>/dev/null | head -1)"
+if [ -z "$HIDRAW_MAJOR" ]; then
+  HIDRAW_MAJOR=243
+  warn "hidraw major not listed in /proc/devices (module not loaded yet?) — assuming $HIDRAW_MAJOR"
+else
+  info "hidraw char major is $HIDRAW_MAJOR"
 fi
 
 [ -d /dev/dri ] || die "/dev/dri missing — no GPU driver with DRM support is loaded"
@@ -308,7 +335,9 @@ EOF
       - /dev/dri:/dev/dri
 
     device_cgroup_rules:
-      - "c 13:* rmw"
+      - "c 13:* rmw"     # input
+      - "c 189:* rmw"    # usb_device -> /dev/bus/usb/*
+      - "c ${HIDRAW_MAJOR}:* rmw"    # hidraw (major is allocated dynamically at boot)
 
     environment:
 EOF
@@ -361,6 +390,9 @@ EOF
       # Encoder config, seeded by the server on first run if absent.
       - $INSTALL_DIR/config:/config
       - /dev/input:/dev/input
+      # Host udev database (read-only): imported USB devices already have their properties
+      # computed by the host's udevd, so we copy rather than guess.
+      - /run/udev/data:/run/host-udev/data:ro
 EOF
   for lib in "${LIBRARY_MOUNTS[@]:-}"; do
     [ -n "$lib" ] && echo "      - $lib:$lib"

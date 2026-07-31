@@ -90,7 +90,36 @@ gow_log "[entrypoint] state dir: ${STATE_DIR}"
 # virtual gamepad (see fake_udev.cpp). SDL/Steam (uid retro) read /run/udev/data to classify the
 # pad; the server (root) writes it. World-rwx so both sides work regardless of uid.
 mkdir -p /run/udev/data
+# /run/udev/control MUST exist before anything creates a udev monitor. libudev binds a monitor to
+# the netlink group only if this file is present AT MONITOR-CREATION TIME; a monitor created
+# before it exists is permanently deaf and never reports an error. Steam/SDL creates its monitor
+# at startup, so without this the controller can silently never appear. fake_udev also creates it
+# on first plug(), but that only saves us because a pad happens to be cold-plugged before Steam
+# launches -- luck of ordering, not design. Verified by test_fake_udev_netlink.
+touch /run/udev/control
 chmod -R 0777 /run/udev
+
+# USB/IP device import: vhci_hcd's attach/detach live in sysfs, which Docker mounts read-only for
+# non-privileged containers. The sysfs SUPERBLOCK is rw (only the mount carries `ro`) and we hold
+# CAP_SYS_ADMIN, so a remount is enough. Optional -- warn and continue if it fails, since only USB
+# passthrough needs it.
+if [ -d /sys/devices/platform/vhci_hcd.0 ]; then
+  if [ ! -w /sys/devices/platform/vhci_hcd.0/attach ]; then
+    if mount -o remount,rw /sys 2>/dev/null; then
+      gow_log "[entrypoint] remounted /sys rw (USB/IP device import)"
+    else
+      gow_log "[entrypoint] WARN: /sys is read-only -- USB device import will be disabled"
+    fi
+  fi
+else
+  gow_log "[entrypoint] vhci_hcd not loaded on the host -- USB device import unavailable"
+fi
+
+# The server mknods imported devices' usbfs nodes under here, into the container's PRIVATE /dev
+# (never the host's devtmpfs -- we chown them, and doing that through a bind mount would mutate
+# the host).
+mkdir -p /dev/bus/usb
+export STEAM_STREAM_HOST_UDEV_DATA="${STEAM_STREAM_HOST_UDEV_DATA:-/run/host-udev/data}"
 
 # PULSE_SERVER must be unset while the daemon starts (it refuses to autospawn otherwise);
 # exported only once the daemon is up.

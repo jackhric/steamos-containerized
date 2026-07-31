@@ -15,7 +15,12 @@ services:
       - /dev/dri:/dev/dri
 
     device_cgroup_rules:
-      - "c 13:* rmw"
+      - "c 13:* rmw"     # input   -> /dev/input/event*
+      - "c 189:* rmw"    # usb_device -> /dev/bus/usb/* (static major)
+      # hidraw's major is allocated dynamically at boot; 243 is what this host assigns. If an
+      # imported device's hidraw node gives EPERM on open, check `grep hidraw /proc/devices` and
+      # update this. quickstart.sh resolves it automatically when it generates a compose file.
+      - "c 243:* rmw"    # hidraw
 
     environment:
       NVIDIA_VISIBLE_DEVICES: all
@@ -56,6 +61,11 @@ services:
       # Encoder config on the host, editable in place (seeded on first run if absent).
       - ./config:/config
       - /dev/input:/dev/input
+      # The host's udev database, read-only. udevd has already run every rule against imported
+      # devices and computed their real properties (ID_VENDOR_ID, ID_SERIAL_SHORT, ...), so we
+      # copy those entries rather than guess at them. Mounted at a separate path so the
+      # container's own /run/udev/data stays private for fake_udev's uinput entries.
+      - /run/udev/data:/run/host-udev/data:ro
       # Game + ROM libraries (read-write so Steam can install; make :ro if you only stream installed games).
       - /mnt/games:/mnt/games
       - /mnt/nas_roms:/mnt/nas_roms
