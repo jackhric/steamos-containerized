@@ -48,8 +48,9 @@ ENV GST_PLUGIN_PATH=/usr/local/lib/x86_64-linux-gnu/gstreamer-1.0 \
     WOLF_RENDER_NODE=/dev/dri/renderD129 \
     STEAM_STREAM_RENDER_NODE=/dev/dri/renderD129 \
     LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64 \
-    # Persist pairing/cert/session state on the /home/retro volume so pairings survive restarts.
-    STEAM_STREAM_STATE_DIR=/home/retro/.steam-stream \
+    # STEAM_STREAM_STATE_DIR is deliberately NOT set here -- the entrypoint picks
+    # /var/lib/steam-stream when that path is mounted and falls back to the legacy
+    # ${HOME}/.steam-stream otherwise, so old compose files keep working unchanged.
     # Encoder config on a dedicated /config mount (bind a host dir here) -- kept OUT of the
     # container/state volume so it's editable on the host and by a future web UI.
     STEAM_STREAM_ENCODER_CONFIG=/config/encoders.toml \

@@ -271,7 +271,7 @@ fi
 
 # --- generate docker-compose.yml -----------------------------------------------
 
-mkdir -p "$INSTALL_DIR/home" "$INSTALL_DIR/config"
+mkdir -p "$INSTALL_DIR/home" "$INSTALL_DIR/config" "$INSTALL_DIR/state"
 COMPOSE="$INSTALL_DIR/docker-compose.yml"
 if [ -e "$COMPOSE" ]; then
   bak="$COMPOSE.bak.$(date +%s)"
@@ -354,8 +354,10 @@ EOF
         hard: 10240
 
     volumes:
-      # Steam login/library + pairing state, persisted on the host.
+      # Steam login/library, persisted on the host.
       - $INSTALL_DIR/home:/home/retro
+      # Moonlight identity (cert/key/uuid + paired clients), on its own mount.
+      - $INSTALL_DIR/state:/var/lib/steam-stream
       # Encoder config, seeded by the server on first run if absent.
       - $INSTALL_DIR/config:/config
       - /dev/input:/dev/input
@@ -416,6 +418,7 @@ cat <<EOF
   Install dir:     $INSTALL_DIR
   Compose file:    $COMPOSE
   Steam data:      $INSTALL_DIR/home
+  Pairing state:   $INSTALL_DIR/state (server cert/key/uuid + paired clients — back this up)
   Encoder config:  $INSTALL_DIR/config/encoders.toml (seeded on first stream if absent)
   Logs:            docker logs -f $CONTAINER_NAME
 EOF

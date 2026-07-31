@@ -46,8 +46,45 @@ mkdir -p /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
 rm -f /tmp/.X11-unix/X* 2>/dev/null || true
 
-mkdir -p "${HOME}/.steam-stream"
-chown "${PUID}:${PGID}" "${HOME}/.steam-stream"
+# The Moonlight identity (cert.pem/key.pem/uuid + clients/) gets its own mount, deliberately
+# independent of /home/retro: Steam churns that tree constantly and anything that resets the
+# retro account takes the pairings with it. Resolved rather than baked into the image ENV so an
+# old compose file without the new mount keeps using its still-persistent legacy location
+# instead of silently landing on the container layer.
+on_mount() {
+  [ -d "$1" ] || return 1
+  [ "$(stat -c %d "$1" 2>/dev/null)" != "$(stat -c %d / 2>/dev/null)" ]
+}
+
+DEFAULT_STATE_DIR=/var/lib/steam-stream
+LEGACY_STATE_DIR="${HOME}/.steam-stream"
+if [ -n "${STEAM_STREAM_STATE_DIR:-}" ]; then
+  STATE_DIR="${STEAM_STREAM_STATE_DIR}"
+elif on_mount "${DEFAULT_STATE_DIR}"; then
+  STATE_DIR="${DEFAULT_STATE_DIR}"
+else
+  STATE_DIR="${LEGACY_STATE_DIR}"
+fi
+mkdir -p "${STATE_DIR}/clients"
+
+# cp, not mv: the legacy copy stays behind as a rollback path if the image is downgraded.
+if [ "${STATE_DIR}" != "${LEGACY_STATE_DIR}" ] && [ ! -s "${STATE_DIR}/key.pem" ] \
+   && [ -s "${LEGACY_STATE_DIR}/key.pem" ]; then
+  gow_log "[entrypoint] migrating Moonlight state ${LEGACY_STATE_DIR} -> ${STATE_DIR}"
+  cp -a "${LEGACY_STATE_DIR}/." "${STATE_DIR}/" \
+    || gow_log "[entrypoint] WARN: state migration failed -- clients may need to re-pair"
+fi
+
+if ! on_mount "${STATE_DIR}"; then
+  gow_log "[entrypoint] ###################################################################"
+  gow_log "[entrypoint] WARNING: state dir ${STATE_DIR} is on the container filesystem."
+  gow_log "[entrypoint] The server identity and all Moonlight pairings will be LOST when this"
+  gow_log "[entrypoint] container is recreated. Mount a host dir at ${DEFAULT_STATE_DIR}."
+  gow_log "[entrypoint] ###################################################################"
+fi
+
+chown -R "${PUID}:${PGID}" "${STATE_DIR}" 2>/dev/null || true
+gow_log "[entrypoint] state dir: ${STATE_DIR}"
 
 # No udevd runs in-container, so the server injects fake-udev hotplug events + hwdb entries for its
 # virtual gamepad (see fake_udev.cpp). SDL/Steam (uid retro) read /run/udev/data to classify the
@@ -80,7 +117,7 @@ export PULSE_SINK="steam-stream"
 export GST_PLUGIN_PATH="${GST_PLUGIN_PATH:-/usr/local/lib/x86_64-linux-gnu/gstreamer-1.0}"
 export LD_LIBRARY_PATH="/usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH:-}"
 export STEAM_STREAM_RENDER_NODE="${STEAM_STREAM_RENDER_NODE:-/dev/dri/renderD129}"
-export STEAM_STREAM_STATE_DIR="${STEAM_STREAM_STATE_DIR:-${HOME}/.steam-stream}"
+export STEAM_STREAM_STATE_DIR="${STATE_DIR}"
 export STEAM_STREAM_RUN_UID="${PUID}" STEAM_STREAM_RUN_GID="${PGID}" STEAM_STREAM_RUN_USER="${UNAME}"
 export STEAM_STREAM_HOME="${HOME}"
 

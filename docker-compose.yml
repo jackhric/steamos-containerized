@@ -47,9 +47,12 @@ services:
         hard: 10240
 
     volumes:
-      # Shared Steam login/library + server pairing state, persisted on the host so it's
-      # inspectable/backup-able in place (not buried in a Docker named volume).
+      # Shared Steam login/library, persisted on the host so it's inspectable/backup-able in
+      # place (not buried in a Docker named volume).
       - /opt/steam-stream/home:/home/retro
+      # Moonlight identity (cert/key/uuid + paired clients) on its own mount, kept out of the
+      # Steam home so nothing that rewrites /home/retro can take the pairings with it.
+      - /opt/steam-stream/state:/var/lib/steam-stream
       # Encoder config on the host, editable in place (seeded on first run if absent).
       - ./config:/config
       - /dev/input:/dev/input
