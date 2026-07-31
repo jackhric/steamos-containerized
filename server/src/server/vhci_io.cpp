@@ -85,6 +85,26 @@ bool attach(int port, int sockfd, std::uint32_t devid, std::uint32_t speed) {
 
 bool detach(int port) { return write_attr("detach", std::to_string(port)); }
 
+bool wait_port_free(int port, int timeout_ms) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  for (;;) {
+    auto rows = read_status();
+    if (rows) {
+      bool busy = false;
+      for (const auto &r : *rows)
+        if (r.port == port && !r.is_free())
+          busy = true;
+      if (!busy)
+        return true;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      logs::log(logs::warning, "[VHCI] port {} still in use {}ms after detach", port, timeout_ms);
+      return false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+}
+
 std::optional<std::string> wait_local_busid(int port, int timeout_ms) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   for (;;) {

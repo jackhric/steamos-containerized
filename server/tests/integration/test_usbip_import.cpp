@@ -10,6 +10,7 @@
 //
 //   STEAM_STREAM_USBIP_DIRECT=127.0.0.1:3240 STEAM_STREAM_USBIP_BUSIDS=1-1 ./test_usbip_import
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -45,13 +46,17 @@ int ports_in_use() {
 std::vector<std::string> nodes_now() {
   std::vector<std::string> out;
   std::error_code ec;
-  for (const auto &p : {"/dev", "/dev/bus/usb"}) {
-    for (const auto &e : std::filesystem::recursive_directory_iterator(p, ec)) {
-      auto s = e.path().string();
-      if (s.rfind("/dev/hidraw", 0) == 0 || s.rfind("/dev/bus/usb/0", 0) == 0)
-        out.push_back(s);
-    }
+  // Character devices only. Matching on the path prefix alone also caught /dev/bus/usb/<bus>
+  // directories, and iterating /dev and /dev/bus/usb separately double-counted the usbfs nodes.
+  for (const auto &e : std::filesystem::recursive_directory_iterator("/dev", ec)) {
+    if (!std::filesystem::is_character_file(e.path(), ec))
+      continue;
+    auto s = e.path().string();
+    if (s.rfind("/dev/hidraw", 0) == 0 || s.rfind("/dev/bus/usb/", 0) == 0)
+      out.push_back(s);
   }
+  std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
   return out;
 }
 } // namespace
@@ -116,6 +121,15 @@ int main() {
 
   // ---- detach ----
   m.detach_session(1);
+  // detach_session now blocks on wait_port_free, so this should already be settled; poll anyway
+  // so a regression reports "took Nms" rather than a bare failure.
+  int waited = 0;
+  while (ports_in_use() > before_ports && waited < 3000) {
+    ::usleep(50 * 1000);
+    waited += 50;
+  }
+  if (waited)
+    std::cout << "       (port release took " << waited << "ms)\n";
   const int final_ports = ports_in_use();
   const auto final_nodes = nodes_now();
 

@@ -220,8 +220,14 @@ struct ImportManager::Impl {
     for (auto it = att.announced.rbegin(); it != att.announced.rend(); ++it)
       fake_udev::unplug(*it);
     att.announced.clear();
-    for (const auto &n : att.created_nodes)
+    for (const auto &n : att.created_nodes) {
       ::unlink(n.c_str());
+      // Leave no empty /dev/bus/usb/<bus> behind; rmdir is a no-op unless it is now empty.
+      std::error_code ec;
+      auto parent = std::filesystem::path(n).parent_path();
+      if (parent.string().rfind("/dev/bus/usb/", 0) == 0)
+        std::filesystem::remove(parent, ec);
+    }
     att.created_nodes.clear();
   }
 
@@ -308,6 +314,9 @@ struct ImportManager::Impl {
       withdraw(att); // announce the removal before the device actually goes, so it reads as a
                      // clean unplug rather than an I/O error
       vhci::detach(att.port);
+      // Block until the kernel has really torn it down, so the next attach cannot land on a port
+      // that is still transitioning.
+      vhci::wait_port_free(att.port, 2000);
       logs::log(logs::info, "[USBIP] detached {} (port {})", att.busid, att.port);
     }
     attached.clear();

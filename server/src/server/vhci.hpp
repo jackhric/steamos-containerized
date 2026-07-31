@@ -78,4 +78,10 @@ bool detach(int port);
 // local_busid is only populated once enumeration completes, which is asynchronous, so poll.
 std::optional<std::string> wait_local_busid(int port, int timeout_ms = 2000);
 
+// Detach is ASYNCHRONOUS: detach_store only queues VDEV_EVENT_DOWN, and a kthread does the
+// teardown. Reading status straight after a detach can still show the port in use, so a fast
+// detach->attach cycle could otherwise pick a port that is still tearing down. Returns false if
+// the port never frees.
+bool wait_port_free(int port, int timeout_ms = 2000);
+
 } // namespace vhci
