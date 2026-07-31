@@ -6,6 +6,12 @@
 
 This repo allows you to run the SteamOS interface as a headless Docker container, just as if you had a Steam Deck or Steam Machine. 
 
+## Features
+* Moonlight compatibility built right in: stream with ultra-low latency
+* Functional MangoHUD: monitor frametimes and other metrics easily right in SteamOS
+* Gamescope session: fully navigatable with a controller, no more keyboards at the couch
+* Seamless USB/IP integration: pass through devices (like the new 2026 Steam Controller) through your client to your host painlessly
+
 ## Use case
 For those that have run a Windows or generic Linux gaming HTPC or streaming setup before, you know the pain. Your games' windows don't focus properly, you end up alt-tabbing 24/7, and there's always a keyboard plugged in case something goes wrong. Say goodbye to that! Since the primary focus of the project is running containerized SteamOS Gamescope sessions, everything just (mostly) works! This project brings the seamlessness of SteamOS right to any configuration, and lets you use your already existing hardware to play games instead of dropping ~$1K on a brand new Steam Machine. Use any old thin client or computer and stream this container right to the TV with minimal latency. 
 
