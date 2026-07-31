@@ -17,7 +17,7 @@ RESULTS="$BUILD/results"
 mkdir -p "$OUT" "$PEG" "$BUILD" "$RESULTS"
 rm -f "$RESULTS"/*
 
-UNIT_TARGETS="test_pairing test_rtsp test_control test_resume_key test_fec test_aes test_xml test_session_key test_usbip_proto test_vhci test_fake_udev test_usb_discovery"
+UNIT_TARGETS="test_pairing test_rtsp test_control test_resume_key test_fec test_aes test_xml test_session_key test_usbip_proto test_vhci test_fake_udev test_usb_discovery test_usb_import_plan"
 INTEG_BIN_TARGETS="test_uinput"
 
 # Offline dependency extraction (same no-clone pattern as build-server.sh).

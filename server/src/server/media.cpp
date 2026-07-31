@@ -1,4 +1,5 @@
 #include <server/media.hpp>
+#include <server/usb_import.hpp>
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -472,6 +473,12 @@ std::shared_ptr<MediaSession> MediaSession::start(const std::shared_ptr<session:
       logs::log(logs::warning, "[MEDIA] failed to create virtual gamepad 0 at session start");
   }
 
+  // Import the client's USB devices for the same reason gamepad 0 is cold-plugged above: they
+  // must exist before Steam's first device scan, or they arrive as a late hotplug that many games
+  // handle badly. Blocking with a hard budget -- there is slack, since the app only launches once
+  // the compositor comes up. Never fails the stream.
+  usbip::ImportManager::instance().attach_for_session(s->session_id, 3000);
+
   if (ms->video_pipeline_) {
     ms->wayland_src_ = gst_bin_get_by_name(GST_BIN(ms->video_pipeline_), "wolf_wayland_source");
     if (!ms->wayland_src_)
@@ -731,6 +738,8 @@ void MediaSession::stop() {
     std::lock_guard<std::mutex> lk(gamepad_mtx_);
     gamepads_.clear();
   }
+  // Return imported devices to the client before the session ends.
+  usbip::ImportManager::instance().detach_session(session_id());
   pointer_sync_.reset(); // joins its thread; must precede wayland_src_ release
   if (wayland_src_) {
     gst_object_unref(wayland_src_);

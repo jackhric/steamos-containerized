@@ -16,6 +16,7 @@
 #include <server/session.hpp>
 #include <server/state.hpp>
 #include <server/uinput.hpp>
+#include <server/usb_import.hpp>
 #include <thread>
 
 static std::string env_or(const char *k, const std::string &def) {
@@ -93,6 +94,14 @@ int main() {
     logs::log(logs::warning, "/dev/uinput not writable -- input injection will fail "
                              "(run container with --device /dev/uinput)");
 
+  // USB/IP device import. Reap first: vhci is host-global and unnamespaced, so an attachment
+  // from a previous run of this process outlives it.
+  {
+    auto &usb = usbip::ImportManager::instance();
+    usb.init();
+    usb.reap_stale();
+  }
+
   auto media_mtx = std::make_shared<std::mutex>();
   std::shared_ptr<media::MediaSession> media_holder;
 
@@ -162,6 +171,10 @@ int main() {
                       existing->audio_channels(), s.audio.channels);
             existing->rebuild_audio(s);
           }
+          // The tunnel dies with the client's network, so vhci will already have unplugged
+          // anything whose link dropped. Re-import only those; a device still attached must be
+          // left alone, since re-plugging reads as a disconnect to the game.
+          usbip::ImportManager::instance().reconcile_session(s.session_id);
           existing->retarget();
           existing->force_idr();
           return;

@@ -129,6 +129,8 @@ if(BUILD_SERVER)
             ${SRC}/server/vhci.cpp
             ${SRC}/server/vhci_io.cpp
             ${SRC}/server/usb_discovery.cpp
+            ${SRC}/server/usb_import_plan.cpp
+            ${SRC}/server/usb_import.cpp
             ${SERVER_PROTO})
 
     target_include_directories(steam-stream-server PRIVATE
@@ -239,6 +241,12 @@ if(BUILD_SERVER)
             ${SRC}/server/usb_discovery.cpp)
     target_include_directories(test_usb_discovery PRIVATE ${SRC})
 
+    # -- USB/IP: node + announcement planning. Pure. --
+    add_executable(test_usb_import_plan ${TESTS}/unit/test_usb_import_plan.cpp
+            ${SRC}/server/usb_import_plan.cpp ${SRC}/server/usb_discovery.cpp
+            ${SRC}/server/fake_udev_props.cpp)
+    target_include_directories(test_usb_import_plan PRIVATE ${SRC})
+
     # -- M4: uinput device-creation smoke test (needs --device /dev/uinput at runtime). --
     add_executable(test_uinput ${TESTS}/integration/test_uinput.cpp ${SRC}/server/uinput.cpp
             ${SRC}/server/fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
@@ -257,6 +265,18 @@ if(BUILD_SERVER)
     target_link_libraries(test_fake_udev_netlink PRIVATE ${CMAKE_DL_LIBS}
             Boost::log Boost::log_setup Boost::thread Boost::system Threads::Threads)
 
+    # -- USB/IP: drives ImportManager standalone (no client, no stream). Needs root + vhci +
+    #    a reachable usbipd, so it is not registered with ctest; run it inside the container. --
+    add_executable(test_usbip_import ${TESTS}/integration/test_usbip_import.cpp
+            ${SRC}/server/usb_import.cpp ${SRC}/server/usb_import_plan.cpp
+            ${SRC}/server/usb_discovery.cpp ${SRC}/server/usbip_proto.cpp
+            ${SRC}/server/vhci.cpp ${SRC}/server/vhci_io.cpp
+            ${SRC}/server/fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
+    target_include_directories(test_usbip_import PRIVATE ${SRC})
+    target_compile_definitions(test_usbip_import PRIVATE FMT_HEADER_ONLY=1 BOOST_LOG_DYN_LINK=1)
+    target_link_libraries(test_usbip_import PRIVATE
+            Boost::log Boost::log_setup Boost::thread Boost::system Threads::Threads)
+
     # Drives synthetic Guide chords into a virtual pad; not registered with ctest
     # since it needs a live Steam session to observe.
     add_executable(test_chord ${TESTS}/integration/test_chord.cpp ${SRC}/server/uinput.cpp
@@ -269,7 +289,7 @@ if(BUILD_SERVER)
     # ---- ctest registration ----
     # UNIT tier: pure, runs anywhere (CPU-only, no devices). `ctest -L unit`.
     foreach(t test_pairing test_rtsp test_control test_resume_key test_fec test_aes test_xml test_session_key
-              test_usbip_proto test_vhci test_fake_udev test_usb_discovery)
+              test_usbip_proto test_vhci test_fake_udev test_usb_discovery test_usb_import_plan)
         add_test(NAME ${t} COMMAND ${t})
         set_tests_properties(${t} PROPERTIES LABELS "unit")
     endforeach()
