@@ -247,6 +247,16 @@ if(BUILD_SERVER)
     target_link_libraries(test_uinput PRIVATE
             Boost::log Boost::log_setup Boost::thread Boost::system Threads::Threads)
 
+    # -- USB/IP: proves libudev actually RECEIVES what fake_udev sends. Uses real libudev
+    #    (dlopen'd, as SDL does) rather than a hand-rolled BPF filter. Needs CAP_NET_ADMIN +
+    #    root, but NOT a GPU or /dev/uinput -- so it is labelled separately from "integration". --
+    add_executable(test_fake_udev_netlink ${TESTS}/integration/test_fake_udev_netlink.cpp
+            ${SRC}/server/fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
+    target_include_directories(test_fake_udev_netlink PRIVATE ${SRC})
+    target_compile_definitions(test_fake_udev_netlink PRIVATE FMT_HEADER_ONLY=1 BOOST_LOG_DYN_LINK=1)
+    target_link_libraries(test_fake_udev_netlink PRIVATE ${CMAKE_DL_LIBS}
+            Boost::log Boost::log_setup Boost::thread Boost::system Threads::Threads)
+
     # Drives synthetic Guide chords into a virtual pad; not registered with ctest
     # since it needs a live Steam session to observe.
     add_executable(test_chord ${TESTS}/integration/test_chord.cpp ${SRC}/server/uinput.cpp
@@ -268,4 +278,9 @@ if(BUILD_SERVER)
     # /dev/uinput container by tests/run-tests.sh). test_uinput needs /dev/uinput.
     add_test(NAME test_uinput COMMAND test_uinput)
     set_tests_properties(test_uinput PROPERTIES LABELS "integration")
+
+    # NETLINK tier: needs CAP_NET_ADMIN + root, but no GPU and no /dev/uinput, so it runs in a
+    # much cheaper container than the integration tier. `ctest -L netlink`.
+    add_test(NAME test_fake_udev_netlink COMMAND test_fake_udev_netlink)
+    set_tests_properties(test_fake_udev_netlink PROPERTIES LABELS "netlink" SKIP_RETURN_CODE 77)
 endif()
