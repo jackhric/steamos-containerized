@@ -1,0 +1,30 @@
+# Devices imported over USB/IP belong to the streaming container, not to this desktop.
+#
+# Linux has no USB namespace, so a device attached via vhci_hcd is unavoidably visible host-wide:
+# the host kernel enumerates it, binds drivers, and creates real /dev nodes. That cannot be
+# prevented. What this file prevents is the HOST USERSPACE from *using* it -- otherwise your
+# desktop compositor reads the controller (a Steam Controller in lizard mode emits mouse and
+# keyboard events, so the cursor moves while you stream) and a host-side Steam may claim it out
+# from under the container.
+#
+# Numbered 72 deliberately: 73-seat-late.rules is what turns TAG=="uaccess" into an ACL for the
+# logged-in seat, so anything hoping to suppress that must run before it.
+#
+# What this must NOT break: the container reaches evdev nodes through the /dev/input bind mount,
+# as the app user via group `input`. So ownership and mode of input nodes are left alone and only
+# libinput is told to ignore them. hidraw is different -- the container mknods its own nodes in a
+# private /dev tmpfs, so the host's copies can be locked down with no effect on it.
+
+# --- evdev: stop the desktop compositor using it, but keep group access for the container ---
+SUBSYSTEM=="input", DEVPATH=="/devices/platform/vhci_hcd*", ENV{LIBINPUT_IGNORE_DEVICE}="1"
+
+# Drop the uaccess tag so logind does not hand your desktop user an ACL. On its own line: if a
+# given udev version rejects TAG-=, only this rule is lost rather than the whole file.
+SUBSYSTEM=="input", DEVPATH=="/devices/platform/vhci_hcd*", TAG-="uaccess"
+
+# --- hidraw: the container has its own nodes, so deny the host outright ---
+SUBSYSTEM=="hidraw", DEVPATH=="/devices/platform/vhci_hcd*", OWNER="root", GROUP="root", MODE="0600"
+SUBSYSTEM=="hidraw", DEVPATH=="/devices/platform/vhci_hcd*", TAG-="uaccess"
+
+# --- usbfs: same reasoning as hidraw ---
+SUBSYSTEM=="usb", DEVPATH=="/devices/platform/vhci_hcd*", OWNER="root", GROUP="root", MODE="0600"

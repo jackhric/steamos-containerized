@@ -95,6 +95,16 @@ if [ -d /etc/modules-load.d ]; then
   done
 fi
 
+# Imported USB/IP devices are visible host-wide (Linux has no USB namespace), so without this
+# rule the host desktop reads the streamed controller -- a Steam Controller in lizard mode moves
+# your cursor while you play. Must sort before 73-seat-late.rules, which applies the uaccess ACL.
+if [ -d /etc/udev/rules.d ] && [ -f "$(dirname "$0")/udev/72-steam-stream-usbip.rules" ]; then
+  install -m 0644 "$(dirname "$0")/udev/72-steam-stream-usbip.rules" \
+    /etc/udev/rules.d/72-steam-stream-usbip.rules
+  udevadm control --reload 2>/dev/null || true
+  info "installed udev rule keeping USB/IP devices out of the host desktop"
+fi
+
 # hidraw's char major is allocated at boot, not fixed. Resolve it now so the generated compose
 # file authorises the right one; a wrong value shows up much later as a bare EPERM on open.
 HIDRAW_MAJOR="$(awk '$2=="hidraw"{print $1}' /proc/devices 2>/dev/null | head -1)"
