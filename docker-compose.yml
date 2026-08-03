@@ -8,31 +8,19 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     network_mode: host
-
+    gpus: all
     devices:
-      - nvidia.com/gpu=all
       - /dev/uinput:/dev/uinput
       - /dev/dri:/dev/dri
-
     device_cgroup_rules:
-      - "c 13:* rmw"     # input   -> /dev/input/event*
-      - "c 189:* rmw"    # usb_device -> /dev/bus/usb/* (static major)
-      # hidraw's major is allocated dynamically at boot; 243 is what this host assigns. If an
-      # imported device's hidraw node gives EPERM on open, check `grep hidraw /proc/devices` and
-      # update this. quickstart.sh resolves it automatically when it generates a compose file.
+      - "c 13:* rmw"     # input
+      - "c 189:* rmw"    # usb_device
+      # hidraw's major is allocated at boot; check `grep hidraw /proc/devices` if it EPERMs.
       - "c 243:* rmw"    # hidraw
 
     environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: all
       STEAM_STREAM_RENDER_NODE: /dev/dri/renderD129
-      WOLF_RENDER_NODE: /dev/dri/renderD129
       WOLF_USE_ZERO_COPY: "TRUE"
-      STEAM_STREAM_ENCODER_CONFIG: /config/encoders.toml
-    group_add:
-      - "989"   # render  -> /dev/dri/renderD128,129
-      - "985"   # video   -> /dev/dri/card*
-      - "994"   # input   -> /dev/uinput, /dev/input/event*
     shm_size: "2gb"
     security_opt:
       - seccomp=unconfined
@@ -44,28 +32,13 @@ services:
       - NET_RAW
       - MKNOD
       - NET_ADMIN
-    # Steam/CEF use host IPC (shared-memory segments) for the webhelper <-> client transport.
-    ipc: host
-    ulimits:
-      nofile:
-        soft: 10240
-        hard: 10240
 
     volumes:
-      # Shared Steam login/library, persisted on the host so it's inspectable/backup-able in
-      # place (not buried in a Docker named volume).
       - /opt/steam-stream/home:/home/retro
-      # Moonlight identity (cert/key/uuid + paired clients) on its own mount, kept out of the
-      # Steam home so nothing that rewrites /home/retro can take the pairings with it.
       - /opt/steam-stream/state:/var/lib/steam-stream
-      # Encoder config on the host, editable in place (seeded on first run if absent).
       - ./config:/config
       - /dev/input:/dev/input
-      # The host's udev database, read-only. udevd has already run every rule against imported
-      # devices and computed their real properties (ID_VENDOR_ID, ID_SERIAL_SHORT, ...), so we
-      # copy those entries rather than guess at them. Mounted at a separate path so the
-      # container's own /run/udev/data stays private for fake_udev's uinput entries.
+      # Separate path so the container's own /run/udev/data stays private to fake_udev.
       - /run/udev/data:/run/host-udev/data:ro
-      # Game + ROM libraries (read-write so Steam can install; make :ro if you only stream installed games).
       - /mnt/games:/mnt/games
       - /mnt/nas_roms:/mnt/nas_roms

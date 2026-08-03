@@ -8,7 +8,7 @@ BIN=/out/steam-stream-server
 RENDER_NODE="${STEAM_STREAM_RENDER_NODE:-/dev/dri/renderD129}"
 export GST_PLUGIN_PATH="/plugins:${GST_PLUGIN_PATH:-/usr/local/lib/x86_64-linux-gnu/gstreamer-1.0}"
 # nvrtc-JIT CUDA elements (cudaconvertscale) only register with libnvrtc on the lib path.
-export LD_LIBRARY_PATH="/usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="/usr/local/nvidia/lib:${LD_LIBRARY_PATH:-}"
 export XDG_RUNTIME_DIR=/tmp/sockets
 PULSE_SOCK="unix:${XDG_RUNTIME_DIR}/pulse/native"
 ST=/tmp/ss-m5
@@ -45,6 +45,7 @@ cp "$ST/cli.crt" "$ST/clients/manual.pem"
 
 export STEAM_STREAM_STATE_DIR="$ST" STEAM_STREAM_LOG_LEVEL=INFO
 export STEAM_STREAM_RENDER_NODE="$RENDER_NODE"
+export WOLF_USE_ZERO_COPY="${WOLF_USE_ZERO_COPY:-TRUE}"
 export PULSE_SERVER="$PULSE_SOCK" PULSE_SINK=steam-stream
 export RUST_LOG="${RUST_LOG:-info}"
 "$BIN" >"$ST/server.log" 2>&1 &

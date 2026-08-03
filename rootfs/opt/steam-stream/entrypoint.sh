@@ -144,7 +144,7 @@ export PULSE_SINK="steam-stream"
 
 # Hand off to the server (runs as root, drops to retro per launch).
 export GST_PLUGIN_PATH="${GST_PLUGIN_PATH:-/usr/local/lib/x86_64-linux-gnu/gstreamer-1.0}"
-export LD_LIBRARY_PATH="/usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="/usr/local/nvidia/lib:${LD_LIBRARY_PATH:-}"
 export STEAM_STREAM_RENDER_NODE="${STEAM_STREAM_RENDER_NODE:-/dev/dri/renderD129}"
 export STEAM_STREAM_STATE_DIR="${STATE_DIR}"
 export STEAM_STREAM_RUN_UID="${PUID}" STEAM_STREAM_RUN_GID="${PGID}" STEAM_STREAM_RUN_USER="${UNAME}"

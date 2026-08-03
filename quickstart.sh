@@ -175,7 +175,12 @@ fi
 [ -e "$RENDER_NODE" ] || die "render node $RENDER_NODE does not exist"
 info "GPU: $GPU_VENDOR ($RENDER_NODE)"
 
-# --- NVIDIA container toolkit + CDI ------------------------------------------
+# --- GPU container runtime (CDI) ---------------------------------------------
+
+# Engine >= 29.2 resolves compose's `gpus: all` through CDI for any vendor, but a CDI spec
+# has to exist: nvidia-ctk writes one below, AMD needs amd-container-toolkit. Intel has no
+# spec and doesn't need one -- VA-API works off the plain /dev/dri mount.
+USE_GPUS_FIELD=0
 
 if [ "$GPU_VENDOR" = "nvidia" ]; then
   [ -e /proc/driver/nvidia/version ] || command -v nvidia-smi >/dev/null \
@@ -207,80 +212,32 @@ if [ "$GPU_VENDOR" = "nvidia" ]; then
     esac
   fi
 
-  # The compose 'nvidia.com/gpu=all' device syntax needs Engine >= 25 and compose >= 2.24
-  # (a preinstalled distro Docker, e.g. Ubuntu 22.04's, can be older).
-  engine_ver="$(docker version -f '{{.Server.Version}}' 2>/dev/null || echo 0)"
-  engine_major="${engine_ver%%.*}"
-  case "$engine_major" in *[!0-9]*|'') engine_major=0 ;; esac
-  [ "$engine_major" -ge 25 ] || die "Docker Engine $engine_ver is too old for CDI GPU passthrough (need >= 25) — upgrade Docker"
-  compose_ver="$(docker compose version --short 2>/dev/null | tr -d v)"
-  if [ "$(printf '%s\n' "2.24.0" "$compose_ver" | sort -V | head -n1)" != "2.24.0" ]; then
-    die "docker compose $compose_ver is too old for CDI device syntax (need >= 2.24) — upgrade the compose plugin"
-  fi
-
   info "generating CDI spec (/etc/cdi/nvidia.yaml)"
   mkdir -p /etc/cdi
   nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml || die "CDI spec generation failed"
+  USE_GPUS_FIELD=1
 
-  # Docker <28 needs CDI explicitly enabled; setting it is harmless on newer versions.
-  DAEMON_JSON=/etc/docker/daemon.json
-  if ! grep -qs '"cdi"[[:space:]]*:[[:space:]]*true' "$DAEMON_JSON" 2>/dev/null; then
-    if command -v python3 >/dev/null; then
-      if python3 - "$DAEMON_JSON" <<'EOF'
-import json, os, sys
-path = sys.argv[1]
-cfg = {}
-if os.path.exists(path):
-    with open(path) as f:
-        text = f.read()
-    if text.strip():
-        try:
-            cfg = json.loads(text)
-        except ValueError:
-            sys.exit(3)
-cfg.setdefault("features", {})["cdi"] = True
-os.makedirs(os.path.dirname(path), exist_ok=True)
-with open(path, "w") as f:
-    json.dump(cfg, f, indent=2)
-EOF
-      then
-        info "enabled CDI in $DAEMON_JSON — restarting Docker"
-        systemctl restart docker || die "docker restart failed"
-      else
-        warn "$DAEMON_JSON is not valid JSON — add {\"features\":{\"cdi\":true}} yourself if the container fails to see the GPU"
-      fi
-    elif [ ! -e "$DAEMON_JSON" ]; then
-      mkdir -p /etc/docker
-      printf '{\n  "features": { "cdi": true }\n}\n' > "$DAEMON_JSON"
-      info "enabled CDI in $DAEMON_JSON — restarting Docker"
-      systemctl restart docker || die "docker restart failed"
-    else
-      warn "cannot safely edit existing $DAEMON_JSON without python3 — add {\"features\":{\"cdi\":true}} yourself if the container fails to see the GPU"
-    fi
+elif [ "$GPU_VENDOR" = "amd" ]; then
+  amd_spec=(/etc/cdi/amd*)
+  if [ -e "${amd_spec[0]}" ]; then
+    USE_GPUS_FIELD=1
+  else
+    info "no AMD CDI spec in /etc/cdi — using the /dev/dri mount (install amd-container-toolkit for CDI)"
   fi
 fi
 
-# --- device group IDs ----------------------------------------------------------
-
-# GIDs differ per distro; derive them from the actual device nodes.
-GIDS=()
-add_gid() {
-  local gid="$1"
-  [ -n "$gid" ] && [ "$gid" != 0 ] || return 0
-  local g
-  for g in "${GIDS[@]:-}"; do [ "$g" = "$gid" ] && return 0; done
-  GIDS+=("$gid")
-}
-add_gid "$(stat -c %g "$RENDER_NODE")"
-card="$(ls /dev/dri/card* 2>/dev/null | head -n1 || true)"
-[ -n "$card" ] && add_gid "$(stat -c %g "$card")"
-event="$(ls /dev/input/event* 2>/dev/null | head -n1 || true)"
-if [ -n "$event" ]; then
-  add_gid "$(stat -c %g "$event")"
-else
-  add_gid "$(getent group input | cut -d: -f3)"
+if [ "$USE_GPUS_FIELD" = 1 ]; then
+  # Engine >= 29.2 resolves `gpus:` through CDI; compose >= 2.30 understands the field at all.
+  # A preinstalled distro Docker (e.g. Ubuntu 22.04's) can be older than both.
+  engine_ver="$(docker version -f '{{.Server.Version}}' 2>/dev/null || echo 0)"
+  if [ "$(printf '%s\n' "29.2.0" "$engine_ver" | sort -V | head -n1)" != "29.2.0" ]; then
+    die "Docker Engine $engine_ver cannot resolve 'gpus:' via CDI (need >= 29.2) — upgrade Docker"
+  fi
+  compose_ver="$(docker compose version --short 2>/dev/null | tr -d v)"
+  if [ "$(printf '%s\n' "2.30.0" "$compose_ver" | sort -V | head -n1)" != "2.30.0" ]; then
+    die "docker compose $compose_ver is too old for the 'gpus:' field (need >= 2.30) — upgrade the compose plugin"
+  fi
 fi
-[ "${#GIDS[@]}" -gt 0 ] || warn "could not derive render/video/input GIDs — GPU/input access may fail in the container"
 
 # --- game library mounts -------------------------------------------------------
 
@@ -337,10 +294,10 @@ services:
     restart: unless-stopped
     network_mode: host
 
-    devices:
 EOF
-  [ "$GPU_VENDOR" = "nvidia" ] && echo "      - nvidia.com/gpu=all"
+  [ "$USE_GPUS_FIELD" = 1 ] && printf '    gpus: all\n\n'
   cat <<EOF
+    devices:
       - /dev/uinput:/dev/uinput
       - /dev/dri:/dev/dri
 
@@ -351,29 +308,14 @@ EOF
 
     environment:
 EOF
+  # Zero-copy is CUDA-only; VA-API uses the plain capture path.
   if [ "$GPU_VENDOR" = "nvidia" ]; then
-    cat <<EOF
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: all
-      WOLF_USE_ZERO_COPY: "TRUE"
-EOF
+    echo '      WOLF_USE_ZERO_COPY: "TRUE"'
   else
-    # Zero-copy is CUDA-only; VA-API uses the plain capture path.
     echo '      WOLF_USE_ZERO_COPY: "FALSE"'
   fi
   cat <<EOF
       STEAM_STREAM_RENDER_NODE: $RENDER_NODE
-      WOLF_RENDER_NODE: $RENDER_NODE
-      STEAM_STREAM_ENCODER_CONFIG: /config/encoders.toml
-EOF
-  # A bare 'group_add:' key (null) is rejected by compose — omit it entirely when empty.
-  if [ "${#GIDS[@]}" -gt 0 ]; then
-    echo "    group_add:"
-    for gid in "${GIDS[@]}"; do
-      echo "      - \"$gid\""
-    done
-  fi
-  cat <<EOF
     shm_size: "2gb"
     security_opt:
       - seccomp=unconfined

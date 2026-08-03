@@ -37,17 +37,15 @@ RUN rm -f \
       /usr/local/lib/x86_64-linux-gnu/gstreamer-1.0/libgstzxing.so \
       /usr/local/lib/x86_64-linux-gnu/gstreamer-1.0/libgstvaapi.so
 
-RUN printf '/usr/local/nvidia/lib\n/usr/local/nvidia/lib64\n' \
+RUN printf '/usr/local/nvidia/lib\n' \
       > /etc/ld.so.conf.d/00-steam-stream-nvidia.conf \
  && ldconfig
 
 ENV GST_PLUGIN_PATH=/usr/local/lib/x86_64-linux-gnu/gstreamer-1.0 \
-    # True zero-copy: waylanddisplaysrc emits memory:CUDAMemory directly (verified working under
-    # CDI on this box). Set FALSE to fall back to the RGBx + cudaupload path.
-    WOLF_USE_ZERO_COPY=TRUE \
-    WOLF_RENDER_NODE=/dev/dri/renderD129 \
-    STEAM_STREAM_RENDER_NODE=/dev/dri/renderD129 \
-    LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64 \
+    # Host-specific values (STEAM_STREAM_RENDER_NODE, WOLF_USE_ZERO_COPY) are deliberately NOT
+    # set here -- compose is their single source, so a rebuilt image can't carry one machine's
+    # render node onto another. Callers running the image directly must pass them.
+    LD_LIBRARY_PATH=/usr/local/nvidia/lib \
     # STEAM_STREAM_STATE_DIR is deliberately NOT set here -- the entrypoint picks
     # /var/lib/steam-stream when that path is mounted and falls back to the legacy
     # ${HOME}/.steam-stream otherwise, so old compose files keep working unchanged.

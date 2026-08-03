@@ -77,6 +77,7 @@ if [[ "$GPU" == "1" ]]; then
     --device /dev/uinput \
     -e GST_PLUGIN_PATH=/plugins \
     -e STEAM_STREAM_RENDER_NODE="$RENDER_NODE" \
+    -e WOLF_USE_ZERO_COPY="${WOLF_USE_ZERO_COPY:-TRUE}" \
     -e SERVER_BIN=/out/steam-stream-server \
     -v "$BUILD":/build -v "$OUT":/out -v "$PLUGINS":/plugins -v "$RESULTS":/results \
     "$IMAGE" -c "

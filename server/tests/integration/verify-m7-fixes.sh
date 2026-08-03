@@ -26,6 +26,7 @@ docker run -d --rm --name "$NAME" \
   --group-add 989 --group-add 985 --group-add 994 \
   --shm-size 2g \
   -e STEAM_STREAM_RENDER_NODE="$RENDER_NODE" \
+  -e WOLF_USE_ZERO_COPY="${WOLF_USE_ZERO_COPY:-TRUE}" \
   -e STEAM_STREAM_STATE_DIR=/seed-state \
   -e STEAM_STREAM_INPUT_SELFTEST=1 \
   -e RUST_LOG=info \
