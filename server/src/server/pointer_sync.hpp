@@ -17,7 +17,10 @@ class PointerSync {
 public:
   using InjectFn = std::function<void(double x, double y)>;
 
-  explicit PointerSync(InjectFn inject_abs);
+  // out_w/out_h are the compositor's output size. gamescope's XWayland can run a
+  // smaller internal mode, and its root coordinates are in that space, so polled
+  // positions are rescaled before injection.
+  PointerSync(InjectFn inject_abs, int out_w, int out_h);
   ~PointerSync();
   PointerSync(const PointerSync &) = delete;
   PointerSync &operator=(const PointerSync &) = delete;
@@ -30,6 +33,8 @@ private:
   void run();
 
   InjectFn inject_;
+  int out_w_;
+  int out_h_;
   std::atomic<bool> stop_{false};
   std::atomic<std::int64_t> last_client_ms_{0};
   std::thread thread_;

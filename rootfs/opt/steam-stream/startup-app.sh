@@ -109,6 +109,12 @@ if [ -n "$RUN_GAMESCOPE" ]; then
   GAMESCOPE_REFRESH=${GAMESCOPE_REFRESH:-60}
   GAMESCOPE_MODE=${GAMESCOPE_MODE:-"-b"}
 
+  # The parent compositor sizes its pointer space from the negotiated stream
+  # resolution; if gamescope's window/XWayland mode ends up smaller, the pointer
+  # sits outside gamescope's surface and mouse input dies while the cursor still
+  # draws. Log what we asked for so that mismatch is visible in `docker logs`.
+  gow_log "gamescope geometry: ${GAMESCOPE_WIDTH}x${GAMESCOPE_HEIGHT}@${GAMESCOPE_REFRESH} (xwayland-count ${GAMESCOPE_XWAYLAND_COUNT})"
+
   # shellcheck disable=SC2086
   # -w/-h pin the internal (XWayland) mode list to the output resolution so
   # games don't pick a standard preset (e.g. 1440p) that gamescope then
@@ -142,6 +148,20 @@ if [ -n "$RUN_GAMESCOPE" ]; then
         [ -S "$xs" ] && DISPLAY=":${xs##*/X}" xhost +si:localuser:root >/dev/null 2>&1
       done
       sleep 2
+    done
+  ) &
+
+  # Deck-mode Steam sets STEAM_TOUCH_CLICK_MODE=4 (passthrough). Nested gamescope feeds parent
+  # pointer motion through its touch path, which in passthrough never moves the X cursor: the
+  # streamed cursor moves but hover/click land nowhere. Pin gamescope's default (1, left) --
+  # there is no real touchscreen to pass through.
+  (
+    xd="/tmp/.X11-unix/X${DISPLAY#:}"
+    DISPLAY="$xd" xprop -root -spy STEAM_TOUCH_CLICK_MODE 2>/dev/null | while read -r line; do
+      case "$line" in
+        *"= 1") ;;
+        *"= "*) DISPLAY="$xd" xprop -root -f STEAM_TOUCH_CLICK_MODE 32c -set STEAM_TOUCH_CLICK_MODE 1 ;;
+      esac
     done
   ) &
 

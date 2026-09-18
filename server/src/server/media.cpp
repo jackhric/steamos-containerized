@@ -489,11 +489,13 @@ std::shared_ptr<MediaSession> MediaSession::start(const std::shared_ptr<session:
       if (!ps || (std::string(ps) != "0" && std::string(ps) != "false")) {
         auto *raw = ms.get(); // safe: pointer_sync_ is reset before wayland_src_ in stop()
         // Deliberately not routed through mouse_move_abs(): that path marks client activity.
-        ms->pointer_sync_ = std::make_unique<input::PointerSync>([raw](double x, double y) {
-          raw->send_wayland_event(gst_structure_new("MouseMoveAbsolute", "pointer_x",
-                                                    G_TYPE_DOUBLE, x, "pointer_y", G_TYPE_DOUBLE,
-                                                    y, NULL));
-        });
+        ms->pointer_sync_ = std::make_unique<input::PointerSync>(
+            [raw](double x, double y) {
+              raw->send_wayland_event(gst_structure_new("MouseMoveAbsolute", "pointer_x",
+                                                        G_TYPE_DOUBLE, x, "pointer_y",
+                                                        G_TYPE_DOUBLE, y, NULL));
+            },
+            s->video.width, s->video.height);
       }
     }
   }
@@ -539,11 +541,17 @@ void MediaSession::mouse_move_abs(double x, double y) {
 }
 
 void MediaSession::mouse_button(unsigned int linux_button, bool pressed) {
+  // Counts as client activity even though it carries no motion: a click-drag held
+  // still would otherwise let PointerSync inject over the top of the gesture.
+  if (pointer_sync_)
+    pointer_sync_->note_client_mouse();
   send_wayland_event(gst_structure_new("MouseButton", "button", G_TYPE_UINT, linux_button,
                                        "pressed", G_TYPE_BOOLEAN, pressed, NULL));
 }
 
 void MediaSession::mouse_axis(double x, double y) {
+  if (pointer_sync_)
+    pointer_sync_->note_client_mouse();
   send_wayland_event(
       gst_structure_new("MouseAxis", "x", G_TYPE_DOUBLE, x, "y", G_TYPE_DOUBLE, y, NULL));
 }
