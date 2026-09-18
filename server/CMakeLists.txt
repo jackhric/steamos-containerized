@@ -102,31 +102,31 @@ if(BUILD_SERVER)
     set(ENET_DIR ${THIRD_PARTY}/enet)
     add_subdirectory(${ENET_DIR} ${CMAKE_BINARY_DIR}/enet-build)
 
-    set(SERVER_PROTO ${SRC}/server/moonlight_proto.cpp)
+    set(SERVER_PROTO ${SRC}/server/http/moonlight_proto.cpp)
 
     add_executable(steam-stream-server
             ${SRC}/server/main.cpp
-            ${SRC}/server/servers.cpp
-            ${SRC}/server/state.cpp
-            ${SRC}/server/https_server.cpp
-            ${SRC}/server/rtsp_server.cpp
-            ${SRC}/server/media.cpp
-            ${SRC}/server/encoder_config.cpp
-            ${SRC}/server/launcher.cpp
-            ${SRC}/server/control.cpp
-            ${SRC}/server/uinput.cpp
-            ${SRC}/server/fake_udev.cpp
-            ${SRC}/server/fake_udev_props.cpp
-            ${SRC}/server/pointer_sync.cpp
-            ${SRC}/server/usbip_proto.cpp
-            ${SRC}/server/vhci.cpp
-            ${SRC}/server/vhci_io.cpp
-            ${SRC}/server/usb_discovery.cpp
-            ${SRC}/server/usb_import_plan.cpp
-            ${SRC}/server/usb_import.cpp
-            ${SRC}/server/usb_handshake.cpp
-            ${SRC}/server/usb_tunnel_proto.cpp
-            ${SRC}/server/usb_tunnel.cpp
+            ${SRC}/server/http/servers.cpp
+            ${SRC}/server/session/state.cpp
+            ${SRC}/server/http/https_server.cpp
+            ${SRC}/server/rtsp/server.cpp
+            ${SRC}/server/media/media.cpp
+            ${SRC}/server/media/encoder_config.cpp
+            ${SRC}/server/session/launcher.cpp
+            ${SRC}/server/control/control.cpp
+            ${SRC}/server/input/uinput.cpp
+            ${SRC}/server/udev/fake_udev.cpp
+            ${SRC}/server/udev/fake_udev_props.cpp
+            ${SRC}/server/input/pointer_sync.cpp
+            ${SRC}/server/usb/usbip_proto.cpp
+            ${SRC}/server/usb/vhci.cpp
+            ${SRC}/server/usb/vhci_io.cpp
+            ${SRC}/server/usb/discovery.cpp
+            ${SRC}/server/usb/import_plan.cpp
+            ${SRC}/server/usb/import.cpp
+            ${SRC}/server/usb/handshake.cpp
+            ${SRC}/server/usb/tunnel_proto.cpp
+            ${SRC}/server/usb/tunnel.cpp
             ${SERVER_PROTO})
 
     target_include_directories(steam-stream-server PRIVATE
@@ -166,7 +166,7 @@ if(BUILD_SERVER)
     target_link_libraries(test_pairing PRIVATE wolf_crypto OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
 
     # -- M3: known-answer RTSP verb test (verbs + SDP + AES-format proof). Header-only
-    #    handlers, so no rtsp_server.cpp needed here. --
+    #    handlers, so no rtsp/server.cpp needed here. --
     add_executable(test_rtsp ${TESTS}/unit/test_rtsp.cpp)
     target_include_directories(test_rtsp PRIVATE ${SRC} ${MP} ${MP}/crypto ${PEGLIB_DIR})
     target_compile_definitions(test_rtsp PRIVATE FMT_HEADER_ONLY=1 BOOST_LOG_DYN_LINK=1)
@@ -217,48 +217,48 @@ if(BUILD_SERVER)
             Boost::thread Boost::system Threads::Threads)
 
     # -- USB/IP: wire-format encode/decode. Pure -- links nothing, needs no kernel module. --
-    add_executable(test_usbip_proto ${TESTS}/unit/test_usbip_proto.cpp ${SRC}/server/usbip_proto.cpp)
+    add_executable(test_usbip_proto ${TESTS}/unit/test_usbip_proto.cpp ${SRC}/server/usb/usbip_proto.cpp)
     target_include_directories(test_usbip_proto PRIVATE ${SRC})
 
     # -- USB/IP: vhci status parsing + free-port selection. Pure; vhci.cpp has no I/O (that lives
     #    in vhci_io.cpp) precisely so this test runs with the module unloaded. --
-    add_executable(test_vhci ${TESTS}/unit/test_vhci.cpp ${SRC}/server/vhci.cpp
-            ${SRC}/server/usbip_proto.cpp)
+    add_executable(test_vhci ${TESTS}/unit/test_vhci.cpp ${SRC}/server/usb/vhci.cpp
+            ${SRC}/server/usb/usbip_proto.cpp)
     target_include_directories(test_vhci PRIVATE ${SRC})
 
     # -- USB/IP: fake_udev property/hash generation, incl. a regression guard pinning the
     #    working uinput gamepad path byte-for-byte. Pure: props TU has no I/O and no logger. --
-    add_executable(test_fake_udev ${TESTS}/unit/test_fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
+    add_executable(test_fake_udev ${TESTS}/unit/test_fake_udev.cpp ${SRC}/server/udev/fake_udev_props.cpp)
     target_include_directories(test_fake_udev PRIVATE ${SRC})
 
     # -- USB/IP: sysfs walk for an imported device. Pure -- SysfsReader is injectable, so the
     #    whole walk runs against a captured tree with no /sys and no root. --
     add_executable(test_usb_discovery ${TESTS}/unit/test_usb_discovery.cpp
-            ${SRC}/server/usb_discovery.cpp)
+            ${SRC}/server/usb/discovery.cpp)
     target_include_directories(test_usb_discovery PRIVATE ${SRC})
 
     # -- USB/IP: node + announcement planning. Pure. --
     add_executable(test_usb_import_plan ${TESTS}/unit/test_usb_import_plan.cpp
-            ${SRC}/server/usb_import_plan.cpp ${SRC}/server/usb_discovery.cpp
-            ${SRC}/server/fake_udev_props.cpp)
+            ${SRC}/server/usb/import_plan.cpp ${SRC}/server/usb/discovery.cpp
+            ${SRC}/server/udev/fake_udev_props.cpp)
     target_include_directories(test_usb_import_plan PRIVATE ${SRC})
 
     # -- USB/IP: tunnel wire format. Pure, and doubles as the contract the client fork is
     #    reimplemented against -- it shares no code with us, only these bytes. --
     add_executable(test_usb_tunnel_framing ${TESTS}/unit/test_usb_tunnel_framing.cpp
-            ${SRC}/server/usb_tunnel_proto.cpp)
+            ${SRC}/server/usb/tunnel_proto.cpp)
     target_include_directories(test_usb_tunnel_framing PRIVATE ${SRC})
 
     # -- USB/IP: the OP_REQ_IMPORT exchange over a fake Channel. Pure: the transport seam is what
     #    makes this testable, and the REFUSED branch (header only, no body) is the one that would
     #    otherwise hang an import until the socket timed out. --
     add_executable(test_usb_handshake ${TESTS}/unit/test_usb_handshake.cpp
-            ${SRC}/server/usb_handshake.cpp ${SRC}/server/usbip_proto.cpp)
+            ${SRC}/server/usb/handshake.cpp ${SRC}/server/usb/usbip_proto.cpp)
     target_include_directories(test_usb_handshake PRIVATE ${SRC})
 
     # -- M4: uinput device-creation smoke test (needs --device /dev/uinput at runtime). --
-    add_executable(test_uinput ${TESTS}/integration/test_uinput.cpp ${SRC}/server/uinput.cpp
-            ${SRC}/server/fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
+    add_executable(test_uinput ${TESTS}/integration/test_uinput.cpp ${SRC}/server/input/uinput.cpp
+            ${SRC}/server/udev/fake_udev.cpp ${SRC}/server/udev/fake_udev_props.cpp)
     target_include_directories(test_uinput PRIVATE ${SRC})
     target_compile_definitions(test_uinput PRIVATE FMT_HEADER_ONLY=1 BOOST_LOG_DYN_LINK=1)
     target_link_libraries(test_uinput PRIVATE
@@ -268,7 +268,7 @@ if(BUILD_SERVER)
     #    (dlopen'd, as SDL does) rather than a hand-rolled BPF filter. Needs CAP_NET_ADMIN +
     #    root, but NOT a GPU or /dev/uinput -- so it is labelled separately from "integration". --
     add_executable(test_fake_udev_netlink ${TESTS}/integration/test_fake_udev_netlink.cpp
-            ${SRC}/server/fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
+            ${SRC}/server/udev/fake_udev.cpp ${SRC}/server/udev/fake_udev_props.cpp)
     target_include_directories(test_fake_udev_netlink PRIVATE ${SRC})
     target_compile_definitions(test_fake_udev_netlink PRIVATE FMT_HEADER_ONLY=1 BOOST_LOG_DYN_LINK=1)
     target_link_libraries(test_fake_udev_netlink PRIVATE ${CMAKE_DL_LIBS}
@@ -278,7 +278,7 @@ if(BUILD_SERVER)
     #    -- no GPU, no kernel module, no root -- so it sits in the cheap "netlink" tier rather
     #    than behind the GPU gate. Its real job is the rejection cases. --
     add_executable(test_usb_tunnel ${TESTS}/integration/test_usb_tunnel.cpp
-            ${SRC}/server/usb_tunnel.cpp ${SRC}/server/usb_tunnel_proto.cpp)
+            ${SRC}/server/usb/tunnel.cpp ${SRC}/server/usb/tunnel_proto.cpp)
     target_include_directories(test_usb_tunnel PRIVATE ${SRC} ${MP}/crypto)
     target_compile_definitions(test_usb_tunnel PRIVATE FMT_HEADER_ONLY=1 BOOST_LOG_DYN_LINK=1)
     target_link_libraries(test_usb_tunnel PRIVATE
@@ -288,21 +288,22 @@ if(BUILD_SERVER)
     # -- USB/IP: drives ImportManager standalone (no client, no stream). Needs root + vhci +
     #    a reachable usbipd, so it is not registered with ctest; run it inside the container. --
     add_executable(test_usbip_import ${TESTS}/integration/test_usbip_import.cpp
-            ${SRC}/server/usb_import.cpp ${SRC}/server/usb_import_plan.cpp
-            ${SRC}/server/usb_handshake.cpp ${SRC}/server/usb_tunnel.cpp
-            ${SRC}/server/usb_tunnel_proto.cpp
-            ${SRC}/server/usb_discovery.cpp ${SRC}/server/usbip_proto.cpp
-            ${SRC}/server/vhci.cpp ${SRC}/server/vhci_io.cpp
-            ${SRC}/server/fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
-    target_include_directories(test_usbip_import PRIVATE ${SRC})
+            ${SRC}/server/usb/import.cpp ${SRC}/server/usb/import_plan.cpp
+            ${SRC}/server/usb/handshake.cpp ${SRC}/server/usb/tunnel.cpp
+            ${SRC}/server/usb/tunnel_proto.cpp
+            ${SRC}/server/usb/discovery.cpp ${SRC}/server/usb/usbip_proto.cpp
+            ${SRC}/server/usb/vhci.cpp ${SRC}/server/usb/vhci_io.cpp
+            ${SRC}/server/udev/fake_udev.cpp ${SRC}/server/udev/fake_udev_props.cpp)
+    target_include_directories(test_usbip_import PRIVATE ${SRC} ${MP}/crypto)
     target_compile_definitions(test_usbip_import PRIVATE FMT_HEADER_ONLY=1 BOOST_LOG_DYN_LINK=1)
     target_link_libraries(test_usbip_import PRIVATE
+            wolf_crypto OpenSSL::SSL OpenSSL::Crypto
             Boost::log Boost::log_setup Boost::thread Boost::system Threads::Threads)
 
     # Drives synthetic Guide chords into a virtual pad; not registered with ctest
     # since it needs a live Steam session to observe.
-    add_executable(test_chord ${TESTS}/integration/test_chord.cpp ${SRC}/server/uinput.cpp
-            ${SRC}/server/fake_udev.cpp ${SRC}/server/fake_udev_props.cpp)
+    add_executable(test_chord ${TESTS}/integration/test_chord.cpp ${SRC}/server/input/uinput.cpp
+            ${SRC}/server/udev/fake_udev.cpp ${SRC}/server/udev/fake_udev_props.cpp)
     target_include_directories(test_chord PRIVATE ${SRC})
     target_compile_definitions(test_chord PRIVATE FMT_HEADER_ONLY=1 BOOST_LOG_DYN_LINK=1)
     target_link_libraries(test_chord PRIVATE

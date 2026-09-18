@@ -6,7 +6,7 @@
 
 #include <cassert>
 #include <iostream>
-#include <server/usb_import_plan.hpp>
+#include <server/usb/import_plan.hpp>
 #include <string>
 #include <vector>
 

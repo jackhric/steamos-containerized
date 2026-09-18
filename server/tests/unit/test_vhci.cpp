@@ -8,7 +8,7 @@
 #include <cassert>
 #include <cstdio>
 #include <iostream>
-#include <server/vhci.hpp>
+#include <server/usb/vhci.hpp>
 #include <string>
 
 using namespace vhci;

@@ -9,16 +9,16 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <server/control.hpp>
-#include <server/encoder_config.hpp>
-#include <server/media.hpp>
-#include <server/rtsp_server.hpp>
-#include <server/servers.hpp>
-#include <server/session.hpp>
-#include <server/state.hpp>
-#include <server/uinput.hpp>
-#include <server/usb_import.hpp>
-#include <server/usb_tunnel.hpp>
+#include <server/control/control.hpp>
+#include <server/media/encoder_config.hpp>
+#include <server/media/media.hpp>
+#include <server/rtsp/server.hpp>
+#include <server/http/servers.hpp>
+#include <server/session/session.hpp>
+#include <server/session/state.hpp>
+#include <server/input/uinput.hpp>
+#include <server/usb/import.hpp>
+#include <server/usb/tunnel.hpp>
 #include <thread>
 #include <unistd.h>
 

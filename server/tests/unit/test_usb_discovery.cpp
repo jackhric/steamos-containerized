@@ -7,7 +7,7 @@
 #include <cassert>
 #include <iostream>
 #include <map>
-#include <server/usb_discovery.hpp>
+#include <server/usb/discovery.hpp>
 #include <iterator>
 #include <set>
 #include <string>

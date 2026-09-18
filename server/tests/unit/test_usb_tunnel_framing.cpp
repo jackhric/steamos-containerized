@@ -7,7 +7,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
-#include <server/usb_tunnel_proto.hpp>
+#include <server/usb/tunnel_proto.hpp>
 #include <string>
 #include <vector>
 

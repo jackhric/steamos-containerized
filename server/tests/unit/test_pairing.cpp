@@ -3,7 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <crypto/crypto.hpp>
-#include <server/moonlight_proto.hpp>
+#include <server/http/moonlight_proto.hpp>
 #include <string>
 
 static int failures = 0;

@@ -3,7 +3,7 @@
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/xml_parser.hpp>
 #include <cstdio>
-#include <server/moonlight_proto.hpp>
+#include <server/http/moonlight_proto.hpp>
 #include <sstream>
 #include <string>
 

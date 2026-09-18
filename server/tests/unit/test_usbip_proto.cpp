@@ -8,7 +8,7 @@
 #include <cassert>
 #include <cstring>
 #include <iostream>
-#include <server/usbip_proto.hpp>
+#include <server/usb/usbip_proto.hpp>
 #include <string>
 #include <vector>
 

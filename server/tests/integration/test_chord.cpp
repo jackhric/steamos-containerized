@@ -6,7 +6,7 @@
 
 #include <charconv>
 #include <helpers/logger.hpp>
-#include <server/uinput.hpp>
+#include <server/input/uinput.hpp>
 #include <thread>
 
 using namespace std::chrono_literals;

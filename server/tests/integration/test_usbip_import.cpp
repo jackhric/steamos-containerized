@@ -17,8 +17,8 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <iostream>
-#include <server/usb_import.hpp>
-#include <server/vhci.hpp>
+#include <server/usb/import.hpp>
+#include <server/usb/vhci.hpp>
 #include <string>
 #include <unistd.h>
 #include <vector>

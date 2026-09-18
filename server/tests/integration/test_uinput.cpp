@@ -1,7 +1,7 @@
 // Smoke test for the raw-uinput injector. Needs a container run with --device /dev/uinput.
 
 #include <helpers/logger.hpp>
-#include <server/uinput.hpp>
+#include <server/input/uinput.hpp>
 #include <thread>
 
 int main() {

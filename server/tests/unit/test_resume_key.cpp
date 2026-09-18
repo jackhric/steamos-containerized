@@ -7,8 +7,8 @@
 #include <crypto/crypto.hpp>
 #include <cstring>
 #include <iostream>
-#include <server/control_packets.hpp>
-#include <server/session.hpp>
+#include <server/control/packets.hpp>
+#include <server/session/session.hpp>
 
 using namespace control;
 using namespace control::pkts;

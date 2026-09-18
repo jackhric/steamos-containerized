@@ -8,7 +8,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
-#include <server/usb_handshake.hpp>
+#include <server/usb/handshake.hpp>
 #include <string>
 #include <vector>
 

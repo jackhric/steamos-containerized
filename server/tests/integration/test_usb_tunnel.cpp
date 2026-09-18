@@ -22,8 +22,8 @@
 #include <sys/socket.h>
 
 #include <crypto/crypto.hpp>
-#include <server/usb_tunnel.hpp>
-#include <server/usb_tunnel_proto.hpp>
+#include <server/usb/tunnel.hpp>
+#include <server/usb/tunnel_proto.hpp>
 
 using namespace usbip;
 

@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <crypto/crypto.hpp>
-#include <server/rtsp_commands.hpp>
+#include <server/rtsp/commands.hpp>
 #include <string>
 
 using namespace std::string_literals;

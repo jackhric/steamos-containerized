@@ -11,7 +11,7 @@
 #include <cassert>
 #include <cstring>
 #include <iostream>
-#include <server/fake_udev.hpp>
+#include <server/udev/fake_udev.hpp>
 #include <string>
 #include <vector>
 
