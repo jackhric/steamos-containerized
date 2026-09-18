@@ -770,6 +770,15 @@ void MediaSession::stop() {
                 clean ? "exited cleanly" : "still alive after 15s -- falling back to group kill");
     }
 
+    // gamescope segfaults in its own exit path even on a lone, orderly SIGTERM (jumps into
+    // already-unmapped code), and every such crash surfaces in the host's crash reporter. With
+    // Steam gone it holds no state worth a graceful exit; SIGKILL runs no user code and never
+    // dumps. It must precede the group SIGTERM, or the Xwaylands die under a live gamescope.
+    // Its main thread renames itself (gamescope-wl), hence the prefix match.
+    for (pid_t p : group_pids(pid))
+      if (proc_comm(p).rfind("gamescope", 0) == 0)
+        ::kill(p, SIGKILL);
+
     ::kill(-pid, SIGTERM);
     auto group_alive = [pid]() { return ::kill(-pid, 0) == 0 || errno != ESRCH; };
     bool dead = false;
