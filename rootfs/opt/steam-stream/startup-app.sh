@@ -145,7 +145,8 @@ if [ -n "$RUN_GAMESCOPE" ]; then
   (
     for attempt in 1 2 3; do
       for xs in /tmp/.X11-unix/X*; do
-        [ -S "$xs" ] && DISPLAY=":${xs##*/X}" xhost +si:localuser:root >/dev/null 2>&1
+        # Path, not ":N" -- ":N" can resolve to the host's X server (see entrypoint.sh).
+        [ -S "$xs" ] && DISPLAY="$xs" xhost +si:localuser:root >/dev/null 2>&1
       done
       sleep 2
     done

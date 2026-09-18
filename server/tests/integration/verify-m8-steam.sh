@@ -117,7 +117,7 @@ WH_PIDS_B="$(docker exec "$NAME" sh -c 'pgrep -x steamwebhelper | sort -n | head
 STEAM_UP="$(icount 'pgrep -xc steam')"
 echo "steamwebhelper t0=$WEBHELPER1 [$WH_PIDS_A]  t+20s=$WEBHELPER2 [$WH_PIDS_B]  steam_up=$STEAM_UP"
 echo "-- gamescope Xwayland mapped clients (:0) --"
-docker exec "$NAME" sh -c 'DISPLAY=:0 xlsclients 2>/dev/null; DISPLAY=:0 xwininfo -root -tree 2>/dev/null | grep -iE "steam|gamescope" | head' || true
+docker exec "$NAME" sh -c 'for xs in /tmp/.X11-unix/X*; do [ -S "$xs" ] || continue; DISPLAY="$xs" xlsclients 2>/dev/null; DISPLAY="$xs" xwininfo -root -tree 2>/dev/null | grep -iE "steam|gamescope" | head; done' || true
 
 echo "################ SESSION 2: relaunch (must reuse :0 cleanly) ################"
 play_retry two; echo "play2_rc=$?"

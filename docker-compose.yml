@@ -17,7 +17,6 @@ services:
       - "c 189:* rmw"    # usb_device
       # hidraw's major is allocated at boot; check `grep hidraw /proc/devices` if it EPERMs.
       - "c 243:* rmw"    # hidraw
-
     environment:
       STEAM_STREAM_RENDER_NODE: /dev/dri/renderD129
       WOLF_USE_ZERO_COPY: "TRUE"

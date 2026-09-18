@@ -41,6 +41,16 @@ fi
 chown -R "${PUID}:${PGID}" "${XDG_RUNTIME_DIR}"
 chmod 700 "${XDG_RUNTIME_DIR}"
 
+# The container is self-contained: the host never provides an X server, and nothing here may use
+# one. network_mode: host shares the abstract socket namespace, so a bare ":0" resolves to the
+# HOST's X server (@/tmp/.X11-unix/X0) whenever the container has no display 0 of its own. Only
+# gamescope/sway's own Xwaylands are valid displays; they set DISPLAY for their children, and
+# anything else dials sockets in this container's /tmp/.X11-unix by path.
+if [ -n "${DISPLAY:-}${XAUTHORITY:-}" ]; then
+  gow_log "[entrypoint] WARN: ignoring inherited DISPLAY/XAUTHORITY -- the host's X server is never used"
+fi
+unset DISPLAY XAUTHORITY
+
 # Clear stale X sockets a hard-killed Xwayland may have left; sticky dir so uid retro can rebind.
 mkdir -p /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
