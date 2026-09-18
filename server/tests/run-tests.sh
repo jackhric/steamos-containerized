@@ -46,14 +46,16 @@ RENDER_NODE="${STEAM_STREAM_RENDER_NODE:-/dev/dri/renderD129}"
 echo "######################## BUILD + UNIT TESTS ########################"
 docker run --rm \
   -v "$SRV":/work -v "$SWS":/sws -v "$PEG":/peg -v "$ENET":/enet \
-  -v "$BUILD":/build -v "$OUT":/out -v "$RESULTS":/results \
+  -v "$BUILD":/build -v "$OUT":/out -v "$PLUGINS":/plugins -v "$RESULTS":/results \
   "$IMAGE" -c "
     set -e
     cmake -S /work -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DBUILD_SERVER=ON -DSIMPLE_WEB_SERVER_DIR=/sws -DPEGLIB_DIR=/peg -DENET_DIR=/enet >/dev/null
     cmake --build /build -j\"\$(nproc)\" \
-      --target steam-stream-server $UNIT_TARGETS $INTEG_BIN_TARGETS
+      --target steam-stream-server gstrtpmoonlight $UNIT_TARGETS $INTEG_BIN_TARGETS
     cp -f /build/steam-stream-server /out/
+    # The integration tier loads the payloader from /plugins; keep it in step with the source.
+    cp -f /build/libgstrtpmoonlightpay.so /plugins/
     cp -f /work/tests/integration/verify-endpoints.sh /work/tests/integration/verify-media.sh /work/tests/integration/verify-m9-resume.sh /out/
     cd /build
     ctest -L unit --output-on-failure 2>&1 | tee /results/unit.log
@@ -135,7 +137,7 @@ if [[ "$INTEG_RAN" == "1" ]]; then
   add "$(get_rc uinput.rc)"    "test_uinput (virtual mouse/keyboard/gamepad creation)"
   add "$(get_rc endpoints.rc)" "verify-endpoints (serverinfo/pair/applist/launch + live RTSP)"
   add "$(get_rc media.rc)"     "verify-media (nvenc pipeline reaches PLAYING + emits RTP)"
-  add "$(get_rc resume.rc)"    "verify-m9-resume (M9 reuse/re-target/IDR + M10 AES key rotation)"
+  add "$(get_rc resume.rc)"    "verify-m9-resume (M9 reuse/re-target + M10 AES rotation + M11 IDR-on-ping/counter reset/dead-app relaunch)"
 else
   LINES+=("  SKIP [integration] test_uinput / verify-endpoints / verify-media (no GPU)")
 fi

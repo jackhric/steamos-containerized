@@ -27,6 +27,12 @@ struct _gst_rtp_moonlight_pay_video {
 
   u_int32_t cur_seq_number;
   u_int32_t frame_num;
+
+  // Armed via reset_on_keyframe: drop buffers until the next keyframe, then restart the seq/frame
+  // numbering. Moonlight's RTP queue starts at seq 0 / frame 1 and rejects anything that looks
+  // "behind" under 16-bit wrap, so a reconnected client can't join a stream mid-count.
+  gint reset_pending;
+  guint reset_dropped;
 };
 
 struct _gst_rtp_moonlight_pay_videoClass {

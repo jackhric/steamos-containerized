@@ -34,6 +34,9 @@ public:
   std::size_t session_id() const { return session_ ? session_->session_id : 0; }
   bool is_active() const { return video_pipeline_ != nullptr; }
   pid_t app_pid() const { return app_pid_->load(); }
+  // False once the launched app tree's leader has exited (gamescope can outlive Steam, so the
+  // process group alone says nothing). True while still launching.
+  bool app_alive() const;
   void retarget();
   void update_bitrate(long bitrate_kbps, int fps);
   // Channel count the running audio pipeline was built with (the pulse sink is only recreated

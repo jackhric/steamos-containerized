@@ -202,6 +202,8 @@ void ControlServer::run() {
           if (sub_type == INPUT_DATA) {
             handle_input(dev, (INPUT_PKT *)decrypted.data(), get_media_ ? get_media_() : nullptr);
           } else if (sub_type == IDR_FRAME) {
+            logs::log(logs::info, "[ENET] client requested IDR for session {}",
+                      dev.session->session_id);
             if (on_idr_)
               on_idr_(dev.session->session_id);
           } else if (sub_type == TERMINATION) {

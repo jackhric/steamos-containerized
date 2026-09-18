@@ -208,10 +208,18 @@ int main() {
           std::lock_guard<std::mutex> lk(*media_mtx);
           existing = media_holder;
         }
-        if (existing && existing->session_id() == s.session_id && existing->is_active()) {
+        bool reusable = existing && existing->session_id() == s.session_id && existing->is_active();
+        if (reusable && !existing->app_alive()) {
+          // Steam exited (or crashed) under the still-running compositor: resuming would stream
+          // an empty desktop. Fall through to a fresh launch, which sweeps the leftover group.
+          logs::log(logs::warning,
+                    "[RTSP] PLAY for session {} -- app (pgid {}) has exited; relaunching instead "
+                    "of resuming",
+                    s.session_id, existing->app_pid());
+        } else if (reusable) {
           logs::log(logs::info,
                     "[RTSP] PLAY for session {} -- RESUME: reusing running app (pgid {}); "
-                    "re-targeting RTP + forcing IDR (no relaunch)",
+                    "re-targeting RTP, IDR + counter reset on the client's first ping (no relaunch)",
                     s.session_id, existing->app_pid());
           // Apply the renegotiated bitrate before the IDR so the keyframe uses the new rate.
           existing->update_bitrate(s.video.bitrate_kbps, s.video.fps);
@@ -229,8 +237,9 @@ int main() {
           // anything whose link dropped. Re-import only those; a device still attached must be
           // left alone, since re-plugging reads as a disconnect to the game.
           usbip::ImportManager::instance().reconcile_session(s.session_id);
+          // No IDR here: the client hasn't pinged yet, so it would be dropped. The UDP listener
+          // forces one when the client's first ping arrives.
           existing->retarget();
-          existing->force_idr();
           return;
         }
       }

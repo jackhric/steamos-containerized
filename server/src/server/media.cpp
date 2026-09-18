@@ -67,6 +67,17 @@ std::string channel_mask(int ch) {
   }
 }
 
+// All three fields are required for gst_video_event_parse_upstream_force_key_unit; a partial
+// structure can be silently ignored by the encoder.
+void force_key_unit(GstElement *pipeline) {
+  gst_element_send_event(
+      pipeline, gst_event_new_custom(GST_EVENT_CUSTOM_UPSTREAM,
+                                     gst_structure_new("GstForceKeyUnit", "running-time",
+                                                       GST_TYPE_CLOCK_TIME, GST_CLOCK_TIME_NONE,
+                                                       "all-headers", G_TYPE_BOOLEAN, TRUE, "count",
+                                                       G_TYPE_UINT, 0u, NULL)));
+}
+
 } // namespace
 
 struct UDPSink {
@@ -78,6 +89,10 @@ struct UDPSink {
   sockaddr_in dest{};
   std::atomic<std::uint64_t> *counter = nullptr;
   std::atomic<bool> *running = nullptr;
+  // Video only. An IDR forced before the client is known is dropped by send(), and the encoders
+  // run an infinite GOP, so the keyframe has to be forced the moment a client is discovered.
+  std::mutex idr_mtx;
+  GstElement *idr_pipeline = nullptr;
 
   void send(const guint8 *data, gsize size) {
     if (!have_client.load())
@@ -164,6 +179,12 @@ int start_udp_listener(UDPSink *sink) {
         logs::log(logs::info, "[MEDIA] RTP client {} on :{} -> {}:{}",
                   first ? "discovered" : "re-targeted", sink->listen_port, ip,
                   ntohs(from.sin_port));
+        std::lock_guard<std::mutex> lk(sink->idr_mtx);
+        if (sink->idr_pipeline) {
+          force_key_unit(sink->idr_pipeline);
+          logs::log(logs::info, "[MEDIA] {} client {}: forcing IDR", sink->label,
+                    first ? "discovered" : "re-targeted");
+        }
       }
     }
   }).detach();
@@ -462,6 +483,10 @@ std::shared_ptr<MediaSession> MediaSession::start(const std::shared_ptr<session:
   auto vpipe = build_video_pipeline(*s, render_node);
   logs::log(logs::info, "[MEDIA] starting video pipeline:\n{}", vpipe);
   ms->video_pipeline_ = launch(vpipe, "video_sink", vsink);
+  if (ms->video_pipeline_) {
+    std::lock_guard<std::mutex> lk(vsink->idr_mtx);
+    vsink->idr_pipeline = ms->video_pipeline_;
+  }
   // Cold-plug controller 0 now, BEFORE the app (gamescope/Steam) launches, so the common single-
   // controller case is present for Steam/SDL's initial scan. Additional controllers are hotplugged
   // on demand (gamepad_arrival / gamepad_update) as the client connects them.
@@ -606,16 +631,22 @@ void MediaSession::gamepad_update(int controller_number, std::uint16_t active_ga
 void MediaSession::force_idr() {
   if (video_pipeline_) {
     logs::log(logs::debug, "[MEDIA] force_idr (GstForceKeyUnit) on video pipeline");
-    // All three fields are required for gst_video_event_parse_upstream_force_key_unit; a
-    // partial structure can be silently ignored by the encoder.
-    gst_element_send_event(
-        video_pipeline_,
-        gst_event_new_custom(GST_EVENT_CUSTOM_UPSTREAM,
-                             gst_structure_new("GstForceKeyUnit", "running-time",
-                                               GST_TYPE_CLOCK_TIME, GST_CLOCK_TIME_NONE,
-                                               "all-headers", G_TYPE_BOOLEAN, TRUE, "count",
-                                               G_TYPE_UINT, 0u, NULL)));
+    force_key_unit(video_pipeline_);
   }
+}
+
+bool MediaSession::app_alive() const {
+  pid_t pid = app_pid_->load();
+  if (pid <= 0)
+    return true; // compositor not up yet; the app hasn't been launched
+  if (::kill(pid, 0) != 0)
+    return false;
+  // PID 1 reaps asynchronously and a zombie still answers kill(0): read the state field.
+  std::ifstream f(fmt::format("/proc/{}/stat", pid));
+  std::string stat;
+  std::getline(f, stat);
+  auto rp = stat.rfind(')');
+  return rp != std::string::npos && rp + 2 < stat.size() && stat[rp + 2] != 'Z';
 }
 
 void MediaSession::update_bitrate(long bitrate_kbps, int fps) {
@@ -650,6 +681,22 @@ void MediaSession::retarget() {
     s->have_client = false;
     logs::log(logs::info, "[MEDIA] {} retarget: awaiting reconnected client RTP ping on :{}",
               s->label, s->listen_port);
+  }
+
+  // Moonlight's RTP queue starts at seq 0 / frame 1 and rejects packets that look "behind" under
+  // 16-bit wrap, so a client joining mid-count can reject every packet until the counters wrap --
+  // longer than its 10s first-frame timeout. Restart numbering at the IDR forced on discovery.
+  if (video_pipeline_) {
+    GstElement *pay = gst_bin_get_by_name(GST_BIN(video_pipeline_), "moonlight_pay");
+    if (pay) {
+      g_object_set(pay, "reset_on_keyframe", TRUE, NULL);
+      gst_object_unref(pay);
+      logs::log(logs::info,
+                "[MEDIA] video payloader armed: RTP seq/frame numbering restarts at the next IDR");
+    } else {
+      logs::log(logs::warning, "[MEDIA] retarget: video payloader 'moonlight_pay' not found -- "
+                               "resumed client may reject the stream");
+    }
   }
 
   // AES key rotates on resume; the audio payloader baked the old key at build, so re-push the
@@ -752,6 +799,10 @@ void MediaSession::stop() {
   if (wayland_src_) {
     gst_object_unref(wayland_src_);
     wayland_src_ = nullptr;
+  }
+  if (video_sink_) {
+    std::lock_guard<std::mutex> lk(video_sink_->idr_mtx);
+    video_sink_->idr_pipeline = nullptr;
   }
   if (video_pipeline_) {
     gst_element_set_state(video_pipeline_, GST_STATE_NULL);

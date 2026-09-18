@@ -26,7 +26,12 @@ enum {
   PROP_ADD_PADDING = 20,
   PROP_FEC_PERCENTAGE = 21,
   PROP_MIN_REQUIRED_FEC_PACKETS = 22,
+  PROP_RESET_ON_KEYFRAME = 23,
 };
+
+// Failsafe for an encoder that never honours the force-key-unit: reset on a P-frame instead of
+// muting the stream forever (the client recovers through its own IDR request).
+static constexpr guint RESET_DROP_LIMIT = 300;
 
 /* pad templates */
 
@@ -106,6 +111,15 @@ static void gst_rtp_moonlight_pay_video_class_init(gst_rtp_moonlight_pay_videoCl
                                                    2,
                                                    G_PARAM_READWRITE));
 
+  g_object_class_install_property(gobject_class,
+                                  PROP_RESET_ON_KEYFRAME,
+                                  g_param_spec_boolean("reset_on_keyframe",
+                                                       "reset_on_keyframe",
+                                                       "Drop until the next keyframe, then restart RTP seq/frame "
+                                                       "numbering (for a client that reconnects mid-stream)",
+                                                       FALSE,
+                                                       G_PARAM_READWRITE));
+
   gobject_class->dispose = gst_rtp_moonlight_pay_video_dispose;
   gobject_class->finalize = gst_rtp_moonlight_pay_video_finalize;
 
@@ -120,7 +134,9 @@ static void gst_rtp_moonlight_pay_video_init(gst_rtp_moonlight_pay_video *rtpmoo
   rtpmoonlightpay_video->min_required_fec_packets = 2;
 
   rtpmoonlightpay_video->cur_seq_number = 0;
-  rtpmoonlightpay_video->frame_num = 0;
+  rtpmoonlightpay_video->frame_num = 1; // Moonlight rejects frame 0 (its queue starts at 1)
+  rtpmoonlightpay_video->reset_pending = 0;
+  rtpmoonlightpay_video->reset_dropped = 0;
 }
 
 void gst_rtp_moonlight_pay_video_set_property(GObject *object,
@@ -143,6 +159,9 @@ void gst_rtp_moonlight_pay_video_set_property(GObject *object,
     break;
   case PROP_MIN_REQUIRED_FEC_PACKETS:
     rtpmoonlightpay_video->min_required_fec_packets = g_value_get_int(value);
+    break;
+  case PROP_RESET_ON_KEYFRAME:
+    g_atomic_int_set(&rtpmoonlightpay_video->reset_pending, g_value_get_boolean(value) ? 1 : 0);
     break;
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -167,6 +186,9 @@ void gst_rtp_moonlight_pay_video_get_property(GObject *object, guint property_id
     break;
   case PROP_MIN_REQUIRED_FEC_PACKETS:
     g_value_set_int(value, rtpmoonlightpay_video->min_required_fec_packets);
+    break;
+  case PROP_RESET_ON_KEYFRAME:
+    g_value_set_boolean(value, g_atomic_int_get(&rtpmoonlightpay_video->reset_pending) != 0);
     break;
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -200,6 +222,21 @@ static GstFlowReturn gst_rtp_moonlight_pay_video_generate_output(GstBaseTransfor
 
   if (inbuf == nullptr)
     return GST_FLOW_OK;
+
+  if (g_atomic_int_get(&rtpmoonlightpay_video->reset_pending)) {
+    bool key = !GST_BUFFER_FLAG_IS_SET(inbuf, GST_BUFFER_FLAG_DELTA_UNIT);
+    if (!key && rtpmoonlightpay_video->reset_dropped < RESET_DROP_LIMIT) {
+      rtpmoonlightpay_video->reset_dropped++;
+      gst_buffer_unref(inbuf);
+      return GST_BASE_TRANSFORM_FLOW_DROPPED;
+    }
+    rtpmoonlightpay_video->cur_seq_number = 0;
+    rtpmoonlightpay_video->frame_num = 1;
+    rtpmoonlightpay_video->reset_dropped = 0;
+    g_atomic_int_set(&rtpmoonlightpay_video->reset_pending, 0);
+    logs::log(key ? logs::info : logs::warning,
+              "[GStreamer] video RTP counters reset (seq 0, frame 1) on {}", key ? "keyframe" : "P-frame after no IDR in " + std::to_string(RESET_DROP_LIMIT) + " buffers");
+  }
 
   auto rtp_packets = gst_moonlight_video::split_into_rtp(rtpmoonlightpay_video, inbuf);
   gst_pad_push_list(trans->srcpad, rtp_packets);
