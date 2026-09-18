@@ -1,13 +1,9 @@
 FROM steam-stream-builder:m1 AS builder
 
 COPY server /src/server
-COPY build/peglib /deps/peglib
-COPY build/enet /deps/enet
 
 RUN cmake -S /src/server -B /tmp/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_SERVER=ON \
-        -DSIMPLE_WEB_SERVER_DIR="$SIMPLE_WEB_SERVER_DIR" \
-        -DPEGLIB_DIR=/deps/peglib -DENET_DIR=/deps/enet \
  && cmake --build /tmp/build -j"$(nproc)" \
         --target steam-stream-server gstrtpmoonlight
 

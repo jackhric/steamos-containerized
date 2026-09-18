@@ -7,31 +7,19 @@ ROOT=/home/jackh/steam-stream
 SRV="$ROOT/server"
 OUT="$ROOT/build/server"
 BUILD="$ROOT/build/tests-build"   # shared by both ctest runs
-SWS="$ROOT/build/simple-web-server"
-PEG="$ROOT/build/peglib"
-ENET="$ROOT/build/enet"
 PLUGINS="$ROOT/build/plugins"
 IMAGE=steam-stream-builder:m1
 RESULTS="$BUILD/results"
 
-mkdir -p "$OUT" "$PEG" "$BUILD" "$RESULTS"
+mkdir -p "$OUT" "$BUILD" "$RESULTS"
 rm -f "$RESULTS"/*
 
 UNIT_TARGETS="test_pairing test_rtsp test_control test_resume_key test_fec test_aes test_xml test_session_key test_usbip_proto test_vhci test_fake_udev test_usb_discovery test_usb_import_plan test_usb_tunnel_framing test_usb_handshake"
 INTEG_BIN_TARGETS="test_uinput test_usb_tunnel"
 
-# Offline dependency extraction (same no-clone pattern as build-server.sh).
-extract_dep() { # <check-file> <src-in-image> <dest>
-  if [[ ! -e "$1" ]]; then
-    echo "==> extracting $(basename "$3") from wolf-builder-check image"
-    cid=$(docker create wolf-builder-check:latest)
-    docker cp "$cid":"$2" "$3"
-    docker rm "$cid" >/dev/null
-  fi
-}
-extract_dep "$SWS/server_http.hpp" /cache/cmake-build/_deps/simplewebserver-src "$SWS"
-extract_dep "$PEG/peglib.h"        /cache/cmake-build/_deps/peglib-src/peglib.h "$PEG/peglib.h"
-extract_dep "$ENET/include/enet/enet.h" /cache/cmake-build/_deps/enet-src "$ENET"
+if [[ ! -f "$SRV/third_party/nanors/rs.c" ]]; then
+  git -C "$ROOT" submodule update --init
+fi
 
 # GPU / uinput detection gates the integration tier.
 GPU=0
@@ -45,12 +33,12 @@ RENDER_NODE="${STEAM_STREAM_RENDER_NODE:-/dev/dri/renderD129}"
 
 echo "######################## BUILD + UNIT TESTS ########################"
 docker run --rm \
-  -v "$SRV":/work -v "$SWS":/sws -v "$PEG":/peg -v "$ENET":/enet \
+  -v "$SRV":/work \
   -v "$BUILD":/build -v "$OUT":/out -v "$PLUGINS":/plugins -v "$RESULTS":/results \
   "$IMAGE" -c "
     set -e
     cmake -S /work -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-      -DBUILD_SERVER=ON -DSIMPLE_WEB_SERVER_DIR=/sws -DPEGLIB_DIR=/peg -DENET_DIR=/enet >/dev/null
+      -DBUILD_SERVER=ON >/dev/null
     cmake --build /build -j\"\$(nproc)\" \
       --target steam-stream-server gstrtpmoonlight $UNIT_TARGETS $INTEG_BIN_TARGETS
     cp -f /build/steam-stream-server /out/

@@ -1,0 +1,13 @@
+[submodule "server/third_party/enet"]
+	path = server/third_party/enet
+	url = https://github.com/cgutman/enet.git
+	branch = moonlight
+[submodule "server/third_party/Simple-Web-Server"]
+	path = server/third_party/Simple-Web-Server
+	url = https://gitlab.com/ReenigneArcher/Simple-Web-Server.git
+[submodule "server/third_party/cpp-peglib"]
+	path = server/third_party/cpp-peglib
+	url = https://github.com/yhirose/cpp-peglib.git
+[submodule "server/third_party/nanors"]
+	path = server/third_party/nanors
+	url = https://github.com/sleepybishop/nanors.git

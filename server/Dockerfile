@@ -23,12 +23,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libtomlplusplus-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Header-only HTTP/HTTPS server lib, the exact fork+commit Wolf's rest/ uses
-# (ReenigneArcher fork of eidheim/Simple-Web-Server, patched for recent Boost).
-RUN git clone https://gitlab.com/ReenigneArcher/Simple-Web-Server.git /opt/Simple-Web-Server \
-    && git -C /opt/Simple-Web-Server checkout 546895a9
-ENV SIMPLE_WEB_SERVER_DIR=/opt/Simple-Web-Server
-
 # Make pkg-config + the loader see Wolf's /usr/local GStreamer first.
 ENV PKG_CONFIG_PATH=/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig
 ENV LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu:/usr/local/lib

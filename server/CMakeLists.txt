@@ -13,6 +13,11 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(SRC   ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(MP    ${SRC}/moonlight-protocol)
 set(TESTS ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+set(THIRD_PARTY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+
+if(NOT EXISTS ${THIRD_PARTY}/nanors/rs.c)
+    message(FATAL_ERROR "Submodules missing: run `git submodule update --init`")
+endif()
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED IMPORTED_TARGET
@@ -27,14 +32,17 @@ set(Boost_USE_STATIC_LIBS OFF)
 find_package(Boost REQUIRED COMPONENTS log log_setup thread system)
 
 # ---- nanors (Reed-Solomon FEC) ----------------------------------------------
-add_library(nanors STATIC ${MP}/nanors/rswrapper.c)
+set(NANORS ${THIRD_PARTY}/nanors)
+add_library(nanors STATIC
+        ${MP}/nanors/rswrapper.c
+        ${NANORS}/rs.c
+        ${NANORS}/deps/obl/oblas_common.c
+        ${NANORS}/deps/obl/oblas_lite.c)
 target_include_directories(nanors PUBLIC
         ${MP}/nanors
-        ${MP}/nanors-upstream
-        ${MP}/nanors-upstream/deps/obl)
-set_source_files_properties(${MP}/nanors/rswrapper.c
-        PROPERTIES COMPILE_FLAGS "-ftree-vectorize -funroll-loops")
-target_compile_options(nanors PRIVATE -w)
+        ${NANORS}
+        ${NANORS}/deps/obl)
+target_compile_options(nanors PRIVATE -O3 -ftree-vectorize -funroll-loops -w)
 
 # ---- wolf crypto -------------------------------------------------------------
 file(GLOB CRYPTO_SRCS ${MP}/crypto/src/*.cpp)
@@ -78,22 +86,10 @@ set_target_properties(gstrtpmoonlight PROPERTIES
 option(BUILD_SERVER "Build the steam-stream Moonlight host server (M2)" OFF)
 
 if(BUILD_SERVER)
-    # Header-only Simple-Web-Server (same fork/commit Wolf uses); path from Docker.
-    set(SIMPLE_WEB_SERVER_DIR "$ENV{SIMPLE_WEB_SERVER_DIR}" CACHE PATH "Simple-Web-Server include dir")
-    if(NOT SIMPLE_WEB_SERVER_DIR)
-        message(FATAL_ERROR "Set SIMPLE_WEB_SERVER_DIR to the Simple-Web-Server checkout")
-    endif()
+    set(SIMPLE_WEB_SERVER_DIR ${THIRD_PARTY}/Simple-Web-Server)
+    set(PEGLIB_DIR ${THIRD_PARTY}/cpp-peglib)
 
-    # Header-only cpp-peglib (single header peglib.h) -- needed by the copied
-    # moonlight-protocol/rtsp/parser.hpp. Extracted offline (build-server.sh) the same
-    # way as Simple-Web-Server, so no agent-initiated git clone.
-    set(PEGLIB_DIR "$ENV{PEGLIB_DIR}" CACHE PATH "cpp-peglib include dir (contains peglib.h)")
-    if(NOT PEGLIB_DIR)
-        message(FATAL_ERROR "Set PEGLIB_DIR to the directory containing peglib.h")
-    endif()
-
-    # M4: GStreamer App (appsink) for the live media send path, and the Moonlight ENet
-    # fork (vendored offline, like the deps above) for the control channel.
+    # M4: GStreamer App (appsink) for the live media send path.
     pkg_check_modules(GSTAPP REQUIRED IMPORTED_TARGET gstreamer-app-1.0)
 
     # toml++ for the encoder config, used header-only: we take just its include dir (not the
@@ -103,10 +99,7 @@ if(BUILD_SERVER)
     get_target_property(TOMLPLUSPLUS_INCLUDE_DIRS
             tomlplusplus::tomlplusplus INTERFACE_INCLUDE_DIRECTORIES)
 
-    set(ENET_DIR "$ENV{ENET_DIR}" CACHE PATH "Moonlight ENet fork source dir (enet-src)")
-    if(NOT ENET_DIR)
-        message(FATAL_ERROR "Set ENET_DIR to the extracted enet-src checkout")
-    endif()
+    set(ENET_DIR ${THIRD_PARTY}/enet)
     add_subdirectory(${ENET_DIR} ${CMAKE_BINARY_DIR}/enet-build)
 
     set(SERVER_PROTO ${SRC}/server/moonlight_proto.cpp)
