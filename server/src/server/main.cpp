@@ -2,6 +2,7 @@
 #include <cerrno>
 #include <csignal>
 #include <cstdlib>
+#include <fcntl.h>
 #include <helpers/logger.hpp>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -19,6 +20,7 @@
 #include <server/usb_import.hpp>
 #include <server/usb_tunnel.hpp>
 #include <thread>
+#include <unistd.h>
 
 static std::string env_or(const char *k, const std::string &def) {
   const char *v = std::getenv(k);
@@ -33,6 +35,15 @@ static void reap_children(int) {
   errno = saved;
 }
 
+static int term_pipe[2] = {-1, -1};
+
+static void on_term(int sig) {
+  int saved = errno;
+  char c = static_cast<char>(sig);
+  (void)!::write(term_pipe[1], &c, 1);
+  errno = saved;
+}
+
 int main() {
   {
     struct sigaction sa{};
@@ -40,6 +51,17 @@ int main() {
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
     ::sigaction(SIGCHLD, &sa, nullptr);
+  }
+  // As PID 1 an unhandled SIGTERM is silently dropped, so `docker stop` would always sit out its
+  // grace period. A handler rather than a blocked mask + sigwait: masks survive exec, and the
+  // launched Steam/gamescope must still honour the SIGTERM MediaSession::stop() sends them.
+  if (::pipe2(term_pipe, O_CLOEXEC) == 0) {
+    struct sigaction sa{};
+    sa.sa_handler = on_term;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    ::sigaction(SIGTERM, &sa, nullptr);
+    ::sigaction(SIGINT, &sa, nullptr);
   }
 
   logs::init(logs::parse_level(env_or("STEAM_STREAM_LOG_LEVEL", "INFO")));
@@ -134,6 +156,23 @@ int main() {
     }
   };
   state.stop_session = stop_session;
+
+  // Graceful stop gives Steam its cloud-save window and hands imported USB devices back; the
+  // listener threads have no clean exit, so the process just ends once that's done.
+  std::thread([&]() {
+    char sig = 0;
+    while (::read(term_pipe[0], &sig, 1) < 0 && errno == EINTR) {
+    }
+    logs::log(logs::info, "[MAIN] signal {} -- shutting down", int(sig));
+    std::shared_ptr<media::MediaSession> victim;
+    {
+      std::lock_guard<std::mutex> lk(*media_mtx);
+      victim.swap(media_holder);
+    }
+    if (victim)
+      victim->stop();
+    ::_exit(0);
+  }).detach();
 
   control::ControlServer control_server(state.control_stream_port, state.sessions);
   control_server.set_idr_callback([&](std::size_t sid) {
