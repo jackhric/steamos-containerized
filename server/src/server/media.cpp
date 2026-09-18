@@ -487,21 +487,10 @@ std::shared_ptr<MediaSession> MediaSession::start(const std::shared_ptr<session:
     std::lock_guard<std::mutex> lk(vsink->idr_mtx);
     vsink->idr_pipeline = ms->video_pipeline_;
   }
-  // Cold-plug controller 0 now, BEFORE the app (gamescope/Steam) launches, so the common single-
-  // controller case is present for Steam/SDL's initial scan. Additional controllers are hotplugged
-  // on demand (gamepad_arrival / gamepad_update) as the client connects them.
-  {
-    std::lock_guard<std::mutex> lk(ms->gamepad_mtx_);
-    if (auto pad = input::VirtualGamepad::create())
-      ms->gamepads_[0] = std::move(pad);
-    else
-      logs::log(logs::warning, "[MEDIA] failed to create virtual gamepad 0 at session start");
-  }
-
-  // Import the client's USB devices for the same reason gamepad 0 is cold-plugged above: they
-  // must exist before Steam's first device scan, or they arrive as a late hotplug that many games
-  // handle badly. Blocking with a hard budget -- there is slack, since the app only launches once
-  // the compositor comes up. Never fails the stream.
+  // Import the client's USB devices before the app launches: they must exist before Steam's first
+  // device scan, or they arrive as a late hotplug that many games handle badly. Blocking with a hard
+  // budget -- there is slack, since the app only launches once the compositor comes up. Never fails
+  // the stream.
   usbip::ImportManager::instance().attach_for_session(s->session_id, 3000);
 
   if (ms->video_pipeline_) {

@@ -103,9 +103,8 @@ mkdir -p /run/udev/data
 # /run/udev/control MUST exist before anything creates a udev monitor. libudev binds a monitor to
 # the netlink group only if this file is present AT MONITOR-CREATION TIME; a monitor created
 # before it exists is permanently deaf and never reports an error. Steam/SDL creates its monitor
-# at startup, so without this the controller can silently never appear. fake_udev also creates it
-# on first plug(), but that only saves us because a pad happens to be cold-plugged before Steam
-# launches -- luck of ordering, not design. Verified by test_fake_udev_netlink.
+# at startup and every pad is hotplugged after it, so without this the controller silently never
+# appears. Verified by test_fake_udev_netlink.
 touch /run/udev/control
 chmod -R 0777 /run/udev
 

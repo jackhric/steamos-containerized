@@ -245,10 +245,8 @@ void expect_filtered_out(udev *ctx, const char *subsystem, const fake_udev::Devi
 // /run/udev/control exists AT MONITOR-CREATION TIME. A monitor created before it exists is
 // permanently deaf -- no later event ever reaches it, and nothing reports an error.
 //
-// That is a live hazard: Steam/SDL creates its monitor at startup. Today we get away with it
-// because fake_udev::ensure_udev_control() runs on the first plug() and MediaSession cold-plugs
-// gamepad 0 before launching Steam -- i.e. by luck of ordering, not by design. The entrypoint
-// creates /run/udev/data but not the control file, so it must be created there too.
+// That is a live hazard: Steam/SDL creates its monitor at startup, and every gamepad is hotplugged
+// after it, so the first plug() creating the file is too late. The entrypoint must create it.
 //
 // Runs FIRST, while no plug() has yet created the file.
 void pin_control_file_ordering(udev *ctx) {

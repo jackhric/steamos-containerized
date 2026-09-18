@@ -29,8 +29,8 @@ std::pair<std::string, int> get_ip(const sockaddr *addr) {
   return {std::string(data), port};
 }
 
-// Mouse/keyboard/scroll go through the compositor (waylanddisplaysrc); the gamepad is cold-plugged
-// by the MediaSession at session start and driven via mm->gamepad_update.
+// Mouse/keyboard/scroll go through the compositor (waylanddisplaysrc); gamepads are hotplugged by
+// the MediaSession when the client reports them and driven via mm->gamepad_update.
 struct ClientDevices {
   std::shared_ptr<session::StreamSession> session;
 };
